@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Verificar la version publicada actual antes de restaurar (json-everything). -->
+    <PackageReference Include="JsonSchema.Net" Version="7.3.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PortabilityAnalyzer.Core\PortabilityAnalyzer.Core.csproj" />
+  </ItemGroup>
+</Project>

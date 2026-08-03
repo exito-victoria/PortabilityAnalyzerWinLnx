@@ -1,0 +1,7 @@
+bin/
+obj/
+*.user
+.vs/
+
+# Configuracion local de Claude Code (permisos personales)
+.claude/settings.local.json
