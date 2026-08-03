@@ -22,8 +22,8 @@ public sealed class MarkdownReportExporter : IReportExporter
         {
             sb.AppendLine($"## {asm.Classification.Name} ({asm.Classification.Kind})");
 
-            var confirmed = asm.ConfirmedFindings().OrderByDescending(x => x.Severidad).ToList();
-            var manual = asm.ManualReviewFindings().OrderByDescending(x => x.Severidad).ToList();
+            var confirmed = ReportGrouping.Group(asm.ConfirmedFindings());
+            var manual = ReportGrouping.Group(asm.ManualReviewFindings());
 
             if (confirmed.Count == 0 && manual.Count == 0)
             {
@@ -37,7 +37,7 @@ public sealed class MarkdownReportExporter : IReportExporter
             sb.AppendLine();
 
             if (confirmed.Count > 0)
-                AppendTable(sb, confirmed);
+                AppendConfirmedTable(sb, confirmed);
             else
             {
                 sb.AppendLine("Sin hallazgos confirmados (solo senales debiles, ver abajo).");
@@ -46,39 +46,39 @@ public sealed class MarkdownReportExporter : IReportExporter
 
             if (manual.Count > 0)
             {
-                var grupos = manual.GroupBy(f => (f.RuleId, f.Evidencia)).Count();
-                sb.AppendLine($"### Revision manual — senal debil, excluida del esfuerzo ({grupos} grupos / {manual.Count} ocurrencias)");
+                var ocurrencias = manual.Sum(g => g.Count);
+                sb.AppendLine($"### Revision manual — senal debil, excluida del esfuerzo ({manual.Count} grupos / {ocurrencias} ocurrencias)");
                 sb.AppendLine();
-                AppendTable(sb, manual);
+                AppendManualTable(sb, manual);
             }
         }
 
         File.WriteAllText(outputPath, sb.ToString());
     }
 
-    /// <summary>
-    /// Escribe una tabla de hallazgos agrupando las ocurrencias identicas (misma regla y misma
-    /// evidencia) en una sola fila con su recuento; muestra una ubicacion de ejemplo. Reduce el ruido
-    /// cuando una dependencia se repite en decenas de metodos (p. ej. P/Invoke de un driver nativo).
-    /// El informe JSON conserva cada ocurrencia por separado.
-    /// </summary>
-    private static void AppendTable(StringBuilder sb, IReadOnlyList<Finding> findings)
+    /// <summary>Tabla de hallazgos confirmados con esfuerzo de adaptacion y alternativa Linux propuesta.</summary>
+    private static void AppendConfirmedTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | Confianza | Bloqueante | N | Ubicacion (ejemplo) | Evidencia |");
-        sb.AppendLine("|-------|-----------|-----------|------------|---|---------------------|-----------|");
-
-        var groups = findings
-            .GroupBy(f => (f.RuleId, f.Evidencia))
-            .OrderByDescending(g => g.First().Severidad)
-            .ThenByDescending(g => g.Count());
-
+        sb.AppendLine("| Regla | Severidad | Bloqueante | N | Esfuerzo (h) | Evidencia | Alternativa Linux (reemplazo propuesto) |");
+        sb.AppendLine("|-------|-----------|------------|---|--------------|-----------|------------------------------------------|");
         foreach (var g in groups)
         {
-            var f = g.First();
-            var count = g.Count();
-            var loc = string.Join(" / ", new[] { f.Type, f.Method }.Where(x => !string.IsNullOrEmpty(x)));
-            if (count > 1 && loc.Length > 0) loc += " …";
-            sb.AppendLine($"| {Cell(f.RuleId)} | {f.Severidad} | {f.Confianza} | {(f.EsBloqueante ? "Si" : "No")} | {count} | {Cell(loc)} | {Cell(f.Evidencia)} |");
+            var f = g.Representative;
+            sb.AppendLine($"| {Cell(f.RuleId)} | {f.Severidad} | {(f.EsBloqueante ? "Si" : "No")} | {g.Count} | {f.Esfuerzo.Media:0.#} | {Cell(f.Evidencia)} | {Cell(f.AlternativaLinux)} |");
+        }
+        sb.AppendLine();
+    }
+
+    /// <summary>Tabla de senal debil (confianza Baja): no cuenta esfuerzo; muestra una ubicacion de ejemplo.</summary>
+    private static void AppendManualTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
+    {
+        sb.AppendLine("| Regla | Severidad | Confianza | N | Evidencia | Ubicacion (ejemplo) |");
+        sb.AppendLine("|-------|-----------|-----------|---|-----------|---------------------|");
+        foreach (var g in groups)
+        {
+            var f = g.Representative;
+            var loc = ReportGrouping.SampleLocation(f, g.Count);
+            sb.AppendLine($"| {Cell(f.RuleId)} | {f.Severidad} | {f.Confianza} | {g.Count} | {Cell(f.Evidencia)} | {Cell(loc)} |");
         }
         sb.AppendLine();
     }

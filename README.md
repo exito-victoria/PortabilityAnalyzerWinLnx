@@ -24,7 +24,7 @@ src/
   PortabilityAnalyzer.Core/        # dominio puro: modelos, enums, PatternMatcher, interfaces
   PortabilityAnalyzer.Rules/       # carga del catálogo + validación contra el schema
   PortabilityAnalyzer.Engine/      # detectores (Mono.Cecil), clasificador, motor, estimador
-  PortabilityAnalyzer.Reporting/   # exportadores JSON y Markdown
+  PortabilityAnalyzer.Reporting/   # exportadores JSON, Markdown y Word (.docx)
   PortabilityAnalyzer.Cli/         # punto de entrada de consola
 ```
 
@@ -43,17 +43,18 @@ del decompilador.
 |------------|--------------------------------------|
 | Rules      | `JsonSchema.Net` (json-everything)   |
 | Engine     | `Mono.Cecil`, `Serilog`              |
+| Reporting  | `DocumentFormat.OpenXml` (Word .docx)|
 | Cli        | `Serilog`, `Serilog.Sinks.Console`   |
 
 ## Uso
 
 ```
 PortabilityAnalyzer.Cli \
-  --path    <.sln | directorio con las DLL | ruta a una DLL> \
+  --path    <.sln | .csproj | directorio con las DLL | ruta a una DLL/EXE> \
   --rules   rules/reglas_portabilidad_windows_linux.json \
   --schema  rules/portability-rules.schema.json \
-  --output  informe.json \
-  --format  json | markdown \
+  --output  informe.docx \
+  --format  json | markdown | word \
   [--assume-third-party] [--third-party-factor <n>]
 ```
 
@@ -62,15 +63,22 @@ mal formado detiene la ejecución con el detalle de los errores.
 
 **Origen de los ensamblados y terceros:**
 
-- Si `--path` apunta a un **`.sln`**, se leen sus `.csproj`, se derivan los nombres de ensamblado
-  propios y se marca como *de terceros* toda DLL de `bin` que no sea salida de un proyecto de la
-  solución (típicamente paquetes NuGet). El factor de incertidumbre se aplica **solo** a esas.
-- Si `--path` es un **directorio o DLL**, no hay resolución de proyecto: por defecto todo se trata
-  como propio (first-party). Usa `--assume-third-party` para aplicar el factor a todo, o
+- Si `--path` apunta a un **`.sln`** o a un **`.csproj`**, se resuelven los proyectos implicados, se
+  derivan los nombres de ensamblado propios y se marca como *de terceros* toda DLL de `bin` que no
+  sea salida de un proyecto (típicamente paquetes NuGet). El factor de incertidumbre se aplica
+  **solo** a esas. Con `.csproj` se analiza únicamente ese proyecto; con `.sln`, todos los suyos.
+- Si `--path` es un **directorio o DLL/EXE**, no hay resolución de proyecto: por defecto todo se
+  trata como propio (first-party). Usa `--assume-third-party` para aplicar el factor a todo, o
   `--third-party-factor <n>` para fijar su valor (implica `--assume-third-party`; por defecto 1.5).
 
-Las carpetas intermedias `obj/` (con sus *reference assemblies* `ref/` y `refint/`) se excluyen
-del escaneo para no contar duplicados solo-metadatos.
+Las salidas se **deduplican por nombre de ensamblado**: una misma DLL copiada en varios `bin` se
+analiza (y aparece en el informe) una sola vez. Las carpetas intermedias `obj/` (con sus *reference
+assemblies* `ref/` y `refint/`) se excluyen del escaneo.
+
+**Formatos de salida:** `json` (contrato para integraciones, una entrada por ocurrencia),
+`markdown` (legible, ocurrencias agregadas) y `word` (`.docx` nativo vía OpenXML). Markdown y Word
+muestran, por dependencia, el **esfuerzo de adaptación** y la **alternativa Linux propuesta**
+(reemplazo por una librería compatible o nativa de Linux).
 
 ## Cómo funciona
 
@@ -81,7 +89,7 @@ del escaneo para no contar duplicados solo-metadatos.
    emite hallazgos con trazabilidad (ensamblado → tipo → método → offset IL).
 4. **Estimación**: el esfuerzo se cuenta una vez por regla y por ensamblado (no se multiplica por
    ocurrencia) y se aplica un factor de incertidumbre a los ensamblados de terceros.
-5. **Informe**: JSON para máquina o Markdown para humanos.
+5. **Informe**: JSON para máquina, o Markdown/Word para humanos (con esfuerzo y alternativa Linux por dependencia).
 
 ## Puntos de extensión
 

@@ -48,23 +48,30 @@ internal static class Program
                 catalog,
                 Log.Logger);
 
-            // 3) Descubrir y analizar. Si la entrada es un .sln, se resuelven los proyectos y se
-            //    determina isThirdParty por ensamblado; si es un directorio o DLL, se usa la
-            //    asuncion global (--assume-third-party).
-            IReadOnlyList<AssemblyRef> assemblies;
-            if (options.InputPath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) && File.Exists(options.InputPath))
+            // 3) Descubrir y analizar. Si la entrada es un .sln o un .csproj, se resuelven los
+            //    proyectos y se determina isThirdParty por ensamblado; si es un directorio o DLL/EXE,
+            //    se usa la asuncion global (--assume-third-party).
+            IReadOnlyList<AssemblyRef> discovered;
+            if (ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
             {
-                assemblies = new SolutionProjectDiscovery().Discover(options.InputPath);
-                Log.Information("Descubrimiento por solucion: {Count} ensamblados ({ThirdParty} de terceros)",
-                    assemblies.Count, assemblies.Count(a => a.IsThirdParty));
+                discovered = new ProjectDiscovery().Discover(options.InputPath);
+                Log.Information("Descubrimiento por solucion/proyecto: {Count} ensamblados ({ThirdParty} de terceros)",
+                    discovered.Count, discovered.Count(a => a.IsThirdParty));
             }
             else
             {
-                assemblies = AssemblyDiscovery.Discover(options.InputPath)
+                discovered = AssemblyDiscovery.Discover(options.InputPath)
                     .Select(p => new AssemblyRef(p, options.AssumeThirdParty))
                     .ToList();
-                Log.Information("Ensamblados encontrados: {Count}", assemblies.Count);
+                Log.Information("Ensamblados encontrados: {Count}", discovered.Count);
             }
+
+            // Deduplicar por nombre de ensamblado: una misma DLL descubierta en varios sitios se
+            // analiza (y aparece en el informe) una sola vez.
+            var assemblies = discovered
+                .GroupBy(a => Path.GetFileName(a.Path), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
 
             var results = new List<AssemblyAnalysisResult>();
             foreach (var asmRef in assemblies)
@@ -85,9 +92,12 @@ internal static class Program
                 SkippedCount = results.Count - analyzed.Count
             };
 
-            IReportExporter exporter = options.Format == "markdown"
-                ? new MarkdownReportExporter()
-                : new JsonReportExporter();
+            IReportExporter exporter = options.Format switch
+            {
+                "markdown" => new MarkdownReportExporter(),
+                "word" => new WordReportExporter(),
+                _ => new JsonReportExporter()
+            };
             exporter.Export(report, options.OutputPath);
 
             Log.Information("Informe escrito en {Path} (bloqueantes: {Blockers}, esfuerzo medio: {Media:0.#} h)",

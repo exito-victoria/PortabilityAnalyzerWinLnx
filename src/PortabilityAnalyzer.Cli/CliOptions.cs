@@ -75,9 +75,11 @@ internal sealed class CliOptions
 
     public static void PrintUsage() =>
         Console.WriteLine(
-            "Uso: PortabilityAnalyzer.Cli --path <dir|dll> --rules <catalogo.json> " +
-            "[--schema <schema.json>] [--output <salida>] [--format json|markdown] " +
+            "Uso: PortabilityAnalyzer.Cli --path <.sln|.csproj|dir|dll> --rules <catalogo.json> " +
+            "[--schema <schema.json>] [--output <salida>] [--format json|markdown|word] " +
             "[--assume-third-party] [--third-party-factor <n>]" + Environment.NewLine +
+            "  --path                    Solucion (.sln), proyecto (.csproj), directorio con DLLs o una DLL/EXE." + Environment.NewLine +
+            "  --format                  json (por defecto) | markdown | word (.docx)." + Environment.NewLine +
             "  --assume-third-party      Aplica un factor de incertidumbre (x1.5 por defecto) a todos los ensamblados." + Environment.NewLine +
             "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party.");
 }
