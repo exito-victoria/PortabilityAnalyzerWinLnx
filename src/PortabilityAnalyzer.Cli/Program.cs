@@ -92,16 +92,24 @@ internal static class Program
                 SkippedCount = results.Count - analyzed.Count
             };
 
-            IReportExporter exporter = options.Format switch
+            // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico
+            // formato se respeta --output tal cual; con varios se deriva la extension por formato.
+            var single = options.Formats.Count == 1;
+            foreach (var fmt in options.Formats)
             {
-                "markdown" => new MarkdownReportExporter(),
-                "word" => new WordReportExporter(),
-                _ => new JsonReportExporter()
-            };
-            exporter.Export(report, options.OutputPath);
+                IReportExporter exporter = fmt switch
+                {
+                    "markdown" => new MarkdownReportExporter(),
+                    "word" => new WordReportExporter(),
+                    _ => new JsonReportExporter()
+                };
+                var path = single ? options.OutputPath : OutputPathFor(options.OutputPath, fmt);
+                exporter.Export(report, path);
+                Log.Information("Informe {Format} escrito en {Path}", fmt, path);
+            }
 
-            Log.Information("Informe escrito en {Path} (bloqueantes: {Blockers}, esfuerzo medio: {Media:0.#} h)",
-                options.OutputPath, report.BlockerCount, report.TotalEffort.Media);
+            Log.Information("Analisis completado (bloqueantes: {Blockers}, esfuerzo medio: {Media:0.#} h)",
+                report.BlockerCount, report.TotalEffort.Media);
             return 0;
         }
         catch (Exception ex)
@@ -113,5 +121,15 @@ internal static class Program
         {
             Log.CloseAndFlush();
         }
+    }
+
+    /// <summary>Deriva la ruta de salida de un formato a partir de la base de --output y su extension
+    /// canonica (.json/.md/.docx). Se usa cuando se piden varios formatos en una misma ejecucion.</summary>
+    private static string OutputPathFor(string basePath, string format)
+    {
+        var dir = Path.GetDirectoryName(basePath) ?? string.Empty;
+        var name = Path.GetFileNameWithoutExtension(basePath);
+        var ext = format switch { "markdown" => ".md", "word" => ".docx", _ => ".json" };
+        return Path.Combine(dir, name + ext);
     }
 }

@@ -53,10 +53,15 @@ PortabilityAnalyzer.Cli \
   --path    <.sln | .csproj | directorio con las DLL | ruta a una DLL/EXE> \
   --rules   rules/reglas_portabilidad_windows_linux.json \
   --schema  rules/portability-rules.schema.json \
-  --output  informe.docx \
-  --format  json | markdown | word \
+  --output  informe \
+  --format  word,markdown \
   [--assume-third-party] [--third-party-factor <n>]
 ```
+
+`--format` acepta `json`, `markdown`, `word`, `all`, o una **lista separada por comas**. Una sola
+ejecución puede generar **varios informes** a la vez (p. ej. `word,markdown` → Word *y* Markdown); con
+varios formatos, la extensión de cada fichero (`.docx`/`.md`/`.json`) se deriva de `--output`. El
+informe **Word** usa página apaisada y tablas de ancho fijo para que **no se desborden de la hoja**.
 
 Si se indica `--schema`, el catálogo se valida contra él **antes** de analizarse; un catálogo
 mal formado detiene la ejecución con el detalle de los errores.

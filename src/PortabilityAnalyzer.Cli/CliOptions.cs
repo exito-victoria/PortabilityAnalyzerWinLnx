@@ -12,7 +12,10 @@ internal sealed class CliOptions
     public required string RulesPath { get; init; }
     public string? SchemaPath { get; init; }
     public string OutputPath { get; init; } = "portability-report.json";
-    public string Format { get; init; } = "json";
+
+    /// <summary>Formatos de salida solicitados. Una sola ejecucion puede generar varios informes
+    /// (p. ej. <c>--format word,markdown</c> o <c>--format all</c>).</summary>
+    public IReadOnlyList<string> Formats { get; init; } = new[] { "json" };
 
     /// <summary>Si es true, se aplica <see cref="ThirdPartyFactor"/> como factor de incertidumbre.
     /// Por defecto false: los ensamblados se tratan como propios (first-party) hasta que exista
@@ -64,10 +67,36 @@ internal sealed class CliOptions
             RulesPath = rules,
             SchemaPath = schema,
             OutputPath = output ?? "portability-report.json",
-            Format = format ?? "json",
+            Formats = ParseFormats(format),
             AssumeThirdParty = assumeThirdParty,
             ThirdPartyFactor = thirdPartyFactor
         };
+    }
+
+    /// <summary>Convierte el valor de <c>--format</c> (lista separada por comas, o <c>all</c>) en una
+    /// lista de formatos validos y sin duplicados. Si no hay ninguno valido, usa json.</summary>
+    private static IReadOnlyList<string> ParseFormats(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return new[] { "json" };
+
+        var tokens = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(t => t.ToLowerInvariant());
+
+        var result = new List<string>();
+        foreach (var t in tokens)
+        {
+            if (t == "all")
+            {
+                foreach (var f in new[] { "json", "markdown", "word" })
+                    if (!result.Contains(f)) result.Add(f);
+            }
+            else if ((t is "json" or "markdown" or "word") && !result.Contains(t))
+            {
+                result.Add(t);
+            }
+        }
+
+        return result.Count > 0 ? result : new[] { "json" };
     }
 
     /// <summary>Devuelve el valor que sigue a una opcion y avanza el indice; null si no hay valor.</summary>
@@ -76,10 +105,12 @@ internal sealed class CliOptions
     public static void PrintUsage() =>
         Console.WriteLine(
             "Uso: PortabilityAnalyzer.Cli --path <.sln|.csproj|dir|dll> --rules <catalogo.json> " +
-            "[--schema <schema.json>] [--output <salida>] [--format json|markdown|word] " +
+            "[--schema <schema.json>] [--output <salida>] [--format <lista>] " +
             "[--assume-third-party] [--third-party-factor <n>]" + Environment.NewLine +
             "  --path                    Solucion (.sln), proyecto (.csproj), directorio con DLLs o una DLL/EXE." + Environment.NewLine +
-            "  --format                  json (por defecto) | markdown | word (.docx)." + Environment.NewLine +
+            "  --format                  json (por defecto) | markdown | word | all, o lista separada por comas" + Environment.NewLine +
+            "                            (p. ej. 'word,markdown' -> una ejecucion, dos informes; la extension" + Environment.NewLine +
+            "                            de cada uno se deriva de --output cuando se piden varios)." + Environment.NewLine +
             "  --assume-third-party      Aplica un factor de incertidumbre (x1.5 por defecto) a todos los ensamblados." + Environment.NewLine +
             "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party.");
 }
