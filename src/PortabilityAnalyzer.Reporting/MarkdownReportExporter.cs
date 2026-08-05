@@ -56,15 +56,19 @@ public sealed class MarkdownReportExporter : IReportExporter
         File.WriteAllText(outputPath, sb.ToString());
     }
 
-    /// <summary>Tabla de hallazgos confirmados con esfuerzo de adaptacion y alternativa Linux propuesta.</summary>
+    /// <summary>Tabla de hallazgos confirmados con esfuerzo, estrategia de separacion, alternativa Linux
+    /// y pasos de remediacion.</summary>
     private static void AppendConfirmedTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | Bloqueante | N | Esfuerzo (h) | Evidencia | Alternativa Linux (reemplazo propuesto) |");
-        sb.AppendLine("|-------|-----------|------------|---|--------------|-----------|------------------------------------------|");
+        sb.AppendLine("| Regla | Severidad | Bloqueante | N | Esfuerzo (h) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediacion |");
+        sb.AppendLine("|-------|-----------|------------|---|--------------|------------|-----------|------------------------------------------|----------------------|");
         foreach (var g in groups)
         {
             var f = g.Representative;
-            sb.AppendLine($"| {Cell(f.RuleId)} | {f.Severidad} | {(f.EsBloqueante ? "Si" : "No")} | {g.Count} | {f.Esfuerzo.Media:0.#} | {Cell(f.Evidencia)} | {Cell(f.AlternativaLinux)} |");
+            sb.AppendLine(
+                $"| {Cell(f.RuleId)} | {f.Severidad} | {(f.EsBloqueante ? "Si" : "No")} | {g.Count} | {f.Esfuerzo.Media:0.#} " +
+                $"| {Cell(ReportGrouping.StrategyText(f.EstrategiaSeparacion))} | {Cell(f.Evidencia)} " +
+                $"| {Cell(ReportGrouping.AlternativeWithNote(f))} | {Cell(ReportGrouping.StepsInline(f.PasosRemediacion))} |");
         }
         sb.AppendLine();
     }

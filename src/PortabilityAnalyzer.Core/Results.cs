@@ -19,6 +19,11 @@ public sealed record Finding
 
     /// <summary>Evidencia concreta (nombre de DLL P/Invoke, literal, atributo, API llamada...).</summary>
     public string? Evidencia { get; init; }
+
+    // --- Guia multiplataforma (heredada de la regla). ---
+    public IReadOnlyList<string> PasosRemediacion { get; init; } = new List<string>();
+    public SeparationStrategy? EstrategiaSeparacion { get; init; }
+    public string? NotaComun { get; init; }
 }
 
 public sealed record AssemblyClassification(string Path, string Name, AssemblyKind Kind, string? Reason = null);

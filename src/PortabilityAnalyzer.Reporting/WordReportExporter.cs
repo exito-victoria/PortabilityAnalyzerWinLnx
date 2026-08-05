@@ -41,7 +41,7 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para(string.Empty));
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
-        double[] confirmedWeights = { 2.0, 1.2, 1.0, 0.5, 1.0, 3.0, 5.0 };
+        double[] confirmedWeights = { 1.8, 1.0, 0.9, 0.5, 0.9, 1.6, 2.3, 3.0, 3.6 };
         double[] manualWeights = { 2.0, 1.2, 1.2, 0.5, 3.0, 3.0 };
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
@@ -64,7 +64,7 @@ public sealed class WordReportExporter : IReportExporter
             if (confirmed.Count > 0)
             {
                 b.Append(BuildTable(
-                    new[] { "Regla", "Severidad", "Bloqueante", "N", "Esfuerzo (h)", "Evidencia", "Alternativa Linux (reemplazo propuesto)" },
+                    new[] { "Regla", "Severidad", "Bloqueante", "N", "Esfuerzo (h)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediacion" },
                     confirmedWeights,
                     confirmed.Select(g =>
                     {
@@ -73,7 +73,10 @@ public sealed class WordReportExporter : IReportExporter
                         {
                             f.RuleId, f.Severidad.ToString(), f.EsBloqueante ? "Si" : "No",
                             g.Count.ToString(), f.Esfuerzo.Media.ToString("0.#"),
-                            f.Evidencia ?? string.Empty, f.AlternativaLinux
+                            ReportGrouping.StrategyText(f.EstrategiaSeparacion),
+                            f.Evidencia ?? string.Empty,
+                            ReportGrouping.AlternativeWithNote(f),
+                            ReportGrouping.StepsInline(f.PasosRemediacion)
                         };
                     })));
             }

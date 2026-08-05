@@ -19,6 +19,9 @@ internal static class FindingFactory
         Type = type,
         Method = method,
         IlOffset = ilOffset,
-        Evidencia = evidencia
+        Evidencia = evidencia,
+        PasosRemediacion = rule.PasosRemediacion,
+        EstrategiaSeparacion = rule.EstrategiaSeparacion,
+        NotaComun = rule.NotaComun
     };
 }

@@ -51,6 +51,17 @@ public sealed record PortabilityRule
     public string AlternativaLinux { get; init; } = string.Empty;
     public EffortEstimate Esfuerzo { get; init; } = EffortEstimate.Zero;
     public Confidence Confianza { get; init; }
+
+    // --- Guia multiplataforma (Fase 1). Campos opcionales; el catalogo antiguo sigue siendo valido. ---
+
+    /// <summary>Pasos concretos para resolver el hallazgo (paso a paso de remediacion).</summary>
+    public IReadOnlyList<string> PasosRemediacion { get; init; } = new List<string>();
+
+    /// <summary>Como separar el codigo afectado para multiplataforma (comun / abstraer / reemplazar / rediseno).</summary>
+    public SeparationStrategy? EstrategiaSeparacion { get; init; }
+
+    /// <summary>Si la libreria puede ser comun a ambos SO, como manejarlo (TFM net8.0, guardas de SO, DI...).</summary>
+    public string? NotaComun { get; init; }
 }
 
 /// <summary>Catalogo completo cargado desde JSON.</summary>

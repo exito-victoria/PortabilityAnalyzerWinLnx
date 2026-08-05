@@ -31,6 +31,9 @@
     "confianza": {
       "enum": ["Alta", "Media", "Baja"]
     },
+    "estrategiaSeparacion": {
+      "enum": ["Comun", "AbstraerPorPlataforma", "ReemplazarDependencia", "RedisenoUI"]
+    },
     "categoria": {
       "enum": [
         "PInvoke",
@@ -110,7 +113,13 @@
         "esBloqueante": { "type": "boolean" },
         "alternativaLinux": { "type": "string" },
         "esfuerzo": { "$ref": "#/$defs/esfuerzo" },
-        "confianza": { "$ref": "#/$defs/confianza" }
+        "confianza": { "$ref": "#/$defs/confianza" },
+        "pasosRemediacion": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "estrategiaSeparacion": { "$ref": "#/$defs/estrategiaSeparacion" },
+        "notaComun": { "type": "string" }
       }
     }
   }

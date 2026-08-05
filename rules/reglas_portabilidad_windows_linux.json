@@ -45,7 +45,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Sustituir por APIs gestionadas equivalentes (System.IO, System.Diagnostics, System.Runtime.InteropServices en su version multiplataforma) o P/Invoke condicional por SO.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar la funcionalidad concreta de cada P/Invoke a kernel32 (procesos, memoria, ficheros, handles).",
+        "Sustituir por la API gestionada equivalente cuando exista (System.IO, System.Diagnostics, System.Runtime.InteropServices).",
+        "Para lo que no tenga equivalente gestionado, aislar la llamada tras una interfaz (p. ej. INativePlatform) con implementacion por SO.",
+        "Guardar las rutas Windows-only con OperatingSystem.IsWindows() y proveer la ruta Linux o un no-op.",
+        "Anadir pruebas que se ejecuten en Windows y Linux (CI en ambos)."
+      ]
     },
     {
       "id": "PINVOKE-USER32",
@@ -78,7 +86,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Reemplazar por equivalentes gestionados (configuracion externa en vez de registro, System.Security.Cryptography portable, etc.).",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Clasificar cada uso de advapi32: registro, servicios, seguridad o criptografia CAPI.",
+        "Registro -> externalizar a appsettings.json / IConfiguration o variables de entorno.",
+        "Criptografia CAPI -> usar System.Security.Cryptography multiplataforma (RSA.Create, Aes.Create).",
+        "Lo que no tenga equivalente gestionado, abstraer tras una interfaz con implementacion solo-Windows.",
+        "Probar el comportamiento en Windows y Linux."
+      ]
     },
     {
       "id": "PINVOKE-OLE32",
@@ -322,7 +338,15 @@
       "esBloqueante": true,
       "alternativaLinux": "WinForms no portable a Linux. Desacoplar de la libreria de negocio.",
       "esfuerzo": { "optimista": 8, "masProbable": 24, "pesimista": 80 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Separar la logica de negocio del codigo WinForms hacia el core comun (net8.0).",
+        "Mantener la UI WinForms/WPF solo en el ejecutable de Windows.",
+        "Implementar la UI de Linux con Avalonia (MVVM), reutilizando ViewModels y logica del core.",
+        "Sustituir las dependencias directas de controles WinForms por abstracciones de presentacion.",
+        "Validar la aplicacion en Windows (UI actual) y en Linux (Avalonia)."
+      ]
     },
     {
       "id": "ASM-SYSTEM-DRAWING-COMMON",
@@ -478,7 +502,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Externalizar la configuracion (appsettings.json, variables de entorno, almacen de secretos). Revisar impacto en trazabilidad si el registro guardaba estado auditable.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Inventariar las claves y valores del Registro que se leen o escriben.",
+        "Mover esa configuracion a appsettings.json / variables de entorno / almacen de secretos, accedida via IConfiguration.",
+        "Si algun valor debe seguir en el Registro en Windows, aislar el acceso tras una interfaz ISettingsStore con implementacion de Registro en Windows y de fichero en Linux.",
+        "Revisar el impacto en trazabilidad/auditoria si el Registro guardaba estado auditable.",
+        "Probar lectura y escritura de configuracion en ambos SO."
+      ]
     },
 
     {
@@ -535,7 +567,15 @@
       "esBloqueante": true,
       "alternativaLinux": "La identidad de Windows no existe en Linux. Sustituir por un esquema de autenticacion multiplataforma (Kerberos/GSSAPI, tokens, LDAP).",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Localizar los usos de WindowsIdentity / WindowsPrincipal / impersonacion.",
+        "Definir una abstraccion de identidad (p. ej. IUserIdentity / IAuthenticationService) desacoplada del SO.",
+        "Implementar en Windows con identidad integrada y en Linux con Kerberos/GSSAPI, LDAP o tokens.",
+        "Sustituir la impersonacion por un modelo explicito de credenciales y roles.",
+        "Probar autenticacion y autorizacion en ambos SO."
+      ]
     },
 
     {
@@ -547,7 +587,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Los apartamentos STA solo tienen sentido con COM/UI de Windows. En una libreria de negocio sin UI, normalmente se puede eliminar.",
       "esfuerzo": { "optimista": 0.5, "masProbable": 2, "pesimista": 8 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "El core queda comun tras quitar STA. Si un componente COM lo exige, mantener STAThread solo en el punto de entrada de la UI Windows (WPF), nunca en el core net8.0.",
+      "pasosRemediacion": [
+        "Comprobar si el codigo marcado con STA usa realmente COM o UI; en el core de negocio no deberia.",
+        "Eliminar STAThreadAttribute / ApartmentState.STA del core comun.",
+        "Si algun componente COM lo exige, dejar STA solo en el arranque de la UI Windows, fuera del core.",
+        "Probar el arranque y la ejecucion en Windows y Linux."
+      ]
     },
     {
       "id": "THREAD-DISPATCHER",
@@ -580,7 +628,15 @@
       "esBloqueante": true,
       "alternativaLinux": "Los semaforos con nombre (system-wide) NO estan soportados en Linux en .NET. Sustituir por SemaphoreSlim (in-process) o un mecanismo IPC alternativo.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Determinar si la sincronizacion es in-process o entre procesos.",
+        "Si es in-process, sustituir por SemaphoreSlim (comun a ambos SO).",
+        "Si es entre procesos (system-wide), abstraer tras una interfaz IInterProcessLock e implementar por SO (named semaphore en Windows; file lock / socket / named pipe u otro IPC en Linux).",
+        "Revisar la limpieza y el abandono del recurso en ambos SO.",
+        "Probar los escenarios de concurrencia en Windows y Linux."
+      ]
     },
     {
       "id": "SYNC-NAMED-EVENTWAITHANDLE",
@@ -682,7 +738,16 @@
       "esBloqueante": true,
       "alternativaLinux": "No existe en .NET moderno. Migrar a Oracle.ManagedDataAccess.Core (100% gestionado, multiplataforma). Reescribir el acceso a datos (OracleConnection/OracleCommand/OracleDataAdapter) contra el nuevo namespace.",
       "esfuerzo": { "optimista": 6, "masProbable": 20, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "notaComun": "Oracle.ManagedDataAccess.Core es comun a Windows y Linux: una vez migrado, el acceso a datos vive en el core net8.0.",
+      "pasosRemediacion": [
+        "Anadir el paquete Oracle.ManagedDataAccess.Core (100% gestionado, multiplataforma).",
+        "Reemplazar los using System.Data.OracleClient por Oracle.ManagedDataAccess.Client.",
+        "Adaptar OracleConnection/OracleCommand/OracleDataAdapter y las cadenas de conexion al nuevo proveedor.",
+        "Revisar tipos y diferencias de API (parametros con nombre, tipos Oracle, secuencias).",
+        "Probar la conectividad y las consultas en Windows y Linux."
+      ]
     },
     {
       "id": "ORACLE-MANAGED-FRAMEWORK",

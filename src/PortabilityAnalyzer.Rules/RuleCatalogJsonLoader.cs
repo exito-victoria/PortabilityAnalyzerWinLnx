@@ -32,6 +32,7 @@ public sealed class RuleCatalogJsonLoader : IRuleCatalogLoader
         options.Converters.Add(new JsonStringEnumConverter<MatchMode>(JsonNamingPolicy.CamelCase));
         options.Converters.Add(new JsonStringEnumConverter<Severity>());
         options.Converters.Add(new JsonStringEnumConverter<Confidence>());
+        options.Converters.Add(new JsonStringEnumConverter<SeparationStrategy>());
         return options;
     }
 
