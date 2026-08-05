@@ -56,17 +56,18 @@ public sealed class MarkdownReportExporter : IReportExporter
         File.WriteAllText(outputPath, sb.ToString());
     }
 
-    /// <summary>Tabla de hallazgos confirmados con esfuerzo, estrategia de separacion, alternativa Linux
-    /// y pasos de remediacion.</summary>
+    /// <summary>Tabla de hallazgos confirmados: donde se encontro (ubicacion), esfuerzo, estrategia de
+    /// separacion, alternativa Linux y pasos de remediacion. La columna Bloqueante se omite por ser
+    /// redundante con Severidad (un bloqueante tiene severidad Bloqueante).</summary>
     private static void AppendConfirmedTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | Bloqueante | N | Esfuerzo (h) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediacion |");
-        sb.AppendLine("|-------|-----------|------------|---|--------------|------------|-----------|------------------------------------------|----------------------|");
+        sb.AppendLine("| Regla | Severidad | N | Esfuerzo (h) | Ubicacion (ejemplo) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediacion |");
+        sb.AppendLine("|-------|-----------|---|--------------|---------------------|------------|-----------|------------------------------------------|----------------------|");
         foreach (var g in groups)
         {
             var f = g.Representative;
             sb.AppendLine(
-                $"| {Cell(f.RuleId)} | {f.Severidad} | {(f.EsBloqueante ? "Si" : "No")} | {g.Count} | {f.Esfuerzo.Media:0.#} " +
+                $"| {Cell(f.RuleId)} | {f.Severidad} | {g.Count} | {f.Esfuerzo.Media:0.#} | {Cell(ReportGrouping.SampleLocation(f, g.Count))} " +
                 $"| {Cell(ReportGrouping.StrategyText(f.EstrategiaSeparacion))} | {Cell(f.Evidencia)} " +
                 $"| {Cell(ReportGrouping.AlternativeWithNote(f))} | {Cell(ReportGrouping.StepsInline(f.PasosRemediacion))} |");
         }

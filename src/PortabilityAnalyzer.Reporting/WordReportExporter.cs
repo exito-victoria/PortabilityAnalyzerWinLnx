@@ -41,7 +41,8 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para(string.Empty));
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
-        double[] confirmedWeights = { 1.8, 1.0, 0.9, 0.5, 0.9, 1.6, 2.3, 3.0, 3.6 };
+        //                              Regla Sev  N   Esf  Ubic Estr Evid Alt  Pasos
+        double[] confirmedWeights = { 1.7, 1.0, 0.5, 0.8, 2.2, 1.5, 2.1, 2.8, 3.4 };
         double[] manualWeights = { 2.0, 1.2, 1.2, 0.5, 3.0, 3.0 };
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
@@ -64,15 +65,16 @@ public sealed class WordReportExporter : IReportExporter
             if (confirmed.Count > 0)
             {
                 b.Append(BuildTable(
-                    new[] { "Regla", "Severidad", "Bloqueante", "N", "Esfuerzo (h)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediacion" },
+                    new[] { "Regla", "Severidad", "N", "Esfuerzo (h)", "Ubicacion (ejemplo)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediacion" },
                     confirmedWeights,
                     confirmed.Select(g =>
                     {
                         var f = g.Representative;
                         return new[]
                         {
-                            f.RuleId, f.Severidad.ToString(), f.EsBloqueante ? "Si" : "No",
-                            g.Count.ToString(), f.Esfuerzo.Media.ToString("0.#"),
+                            f.RuleId, f.Severidad.ToString(), g.Count.ToString(),
+                            f.Esfuerzo.Media.ToString("0.#"),
+                            ReportGrouping.SampleLocation(f, g.Count),
                             ReportGrouping.StrategyText(f.EstrategiaSeparacion),
                             f.Evidencia ?? string.Empty,
                             ReportGrouping.AlternativeWithNote(f),

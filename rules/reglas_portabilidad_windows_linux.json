@@ -64,7 +64,14 @@
       "esBloqueante": true,
       "alternativaLinux": "No portable directamente: funcionalidad de UI Win32. Requiere rediseno de la capa de presentacion o eliminacion de la dependencia en la libreria de negocio.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 60 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Identificar la funcionalidad de UI Win32 (ventanas, mensajes, entrada).",
+        "Mover esa funcionalidad a la capa de presentacion: WPF en Windows, Avalonia en Linux.",
+        "Eliminar el P/Invoke a user32 del core comun.",
+        "Validar la UI en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-GDI32",
@@ -75,7 +82,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Sustituir grafico por SkiaSharp o ImageSharp (multiplataforma).",
       "esfuerzo": { "optimista": 3, "masProbable": 12, "pesimista": 40 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Localizar el dibujo/graficos que usan gdi32.",
+        "Sustituir por SkiaSharp o ImageSharp (multiplataforma).",
+        "Aislar el codigo de dibujo tras una abstraccion si comparte logica.",
+        "Probar el render en Windows y Linux."
+      ]
     },
     {
       "id": "PINVOKE-ADVAPI32",
@@ -105,7 +119,14 @@
       "esBloqueante": true,
       "alternativaLinux": "COM no existe en Linux: eliminar la dependencia o abstraer el servicio detras de una interfaz multiplataforma.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar el servicio COM que se obtiene via ole32.",
+        "Abstraer ese servicio tras una interfaz multiplataforma.",
+        "Proveer implementacion Windows (COM) y alternativa Linux, o eliminar la dependencia.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-OLEAUT32",
@@ -116,7 +137,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Automatizacion OLE no disponible en Linux: rediseno necesario.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Localizar el uso de automatizacion OLE (VARIANT/BSTR).",
+        "Redisenar sin OLE: usar tipos y serializacion gestionados.",
+        "Aislar lo que dependa de Windows tras una interfaz.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-SHELL32",
@@ -127,7 +155,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Sustituir por Environment.GetFolderPath / APIs gestionadas o logica especifica por SO.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar el uso concreto de shell32 (rutas especiales, iconos).",
+        "Sustituir por Environment.GetFolderPath o APIs gestionadas.",
+        "Lo especifico del shell, aislar por SO.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-COMDLG32",
@@ -138,7 +173,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Dialogos Win32 no portables: parte de la UI, gestionar en la capa de presentacion multiplataforma.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Los dialogos comunes son UI: moverlos a la capa de presentacion.",
+        "En Windows usar los dialogos de WPF; en Linux los de Avalonia.",
+        "Quitar el P/Invoke a comdlg32 del core.",
+        "Validar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-COMCTL32",
@@ -149,7 +191,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Controles Win32 no portables: parte de la UI.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Los controles comunes son UI: reimplementar en la capa de presentacion.",
+        "WPF en Windows, Avalonia en Linux.",
+        "Quitar la dependencia de comctl32 del core.",
+        "Validar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-WINMM",
@@ -160,7 +209,13 @@
       "esBloqueante": false,
       "alternativaLinux": "Sustituir por libreria multimedia multiplataforma o temporizadores gestionados (System.Threading / PeriodicTimer).",
       "esfuerzo": { "optimista": 1, "masProbable": 6, "pesimista": 20 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Identificar el uso (sonido, temporizadores multimedia).",
+        "Sustituir por una libreria multimedia multiplataforma o por temporizadores gestionados (PeriodicTimer).",
+        "Probar en Windows y Linux."
+      ]
     },
     {
       "id": "PINVOKE-CRYPT32",
@@ -171,7 +226,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Reemplazar por System.Security.Cryptography portable; el almacen de certificados en Linux se basa en OpenSSL/ficheros PEM.",
       "esfuerzo": { "optimista": 3, "masProbable": 10, "pesimista": 30 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Clasificar el uso: almacen de certificados o CryptoAPI.",
+        "Migrar a System.Security.Cryptography multiplataforma.",
+        "Cargar certificados desde fichero (PEM/PFX) en lugar del almacen del SO.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-SETUPAPI",
@@ -182,7 +244,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Enumeracion de dispositivos especifica de Windows: en Linux usar sysfs/udev; rediseno necesario.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar la enumeracion de dispositivos/drivers usada.",
+        "Abstraer tras una interfaz de descubrimiento de dispositivos.",
+        "En Linux implementar via sysfs/udev; en Windows con setupapi.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-NETAPI32",
@@ -193,7 +262,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Funciones de red de dominio Windows no portables.",
       "esfuerzo": { "optimista": 4, "masProbable": 12, "pesimista": 40 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar las funciones de red/dominio usadas.",
+        "Abstraer tras una interfaz multiplataforma.",
+        "En Linux usar equivalentes (LDAP, comandos del sistema) o eliminar.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-SECUR32",
@@ -204,7 +280,14 @@
       "esBloqueante": true,
       "alternativaLinux": "SSPI no existe en Linux; usar GSSAPI/Kerberos o esquema de autenticacion alternativo.",
       "esfuerzo": { "optimista": 6, "masProbable": 20, "pesimista": 60 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Localizar el uso de SSPI/autenticacion integrada.",
+        "Abstraer la autenticacion tras una interfaz.",
+        "En Windows usar SSPI; en Linux GSSAPI/Kerberos.",
+        "Probar autenticacion en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-WTSAPI32",
@@ -215,7 +298,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Concepto de sesiones de Terminal Services no aplicable en Linux.",
       "esfuerzo": { "optimista": 4, "masProbable": 12, "pesimista": 40 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar el uso de sesiones de Terminal Services.",
+        "Revisar si el concepto aplica en Linux; si no, eliminar la funcionalidad.",
+        "Si aplica, aislar tras una interfaz con implementacion por SO.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-DWMAPI",
@@ -226,7 +316,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Efectos de composicion de ventanas de Windows: parte de la UI, no portable.",
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 16 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Efectos de composicion de ventanas: son UI.",
+        "Mover a la capa de presentacion (WPF Windows / Avalonia Linux).",
+        "Quitar dwmapi del core.",
+        "Validar la UI en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-UXTHEME",
@@ -237,7 +334,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Temas visuales Win32: parte de la UI, no portable.",
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 16 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Temas visuales Win32: son UI.",
+        "Gestionar el tema en la capa de presentacion multiplataforma.",
+        "Quitar uxtheme del core.",
+        "Validar en ambos SO."
+      ]
     },
     {
       "id": "PINVOKE-GENERIC-WINDLL",
@@ -248,7 +352,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Verificar si existe la .so equivalente en Linux o si la funcionalidad tiene alternativa gestionada. Comprobar tambien P/Invoke a librerias de terceros embebidas.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 30 },
-      "confianza": "Baja"
+      "confianza": "Baja",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "REVISION MANUAL: identificar el origen de la DLL nativa.",
+        "Comprobar si existe la .so equivalente en Linux o una alternativa gestionada.",
+        "Si es de un tercero, analizar sus dependencias del SO (analisis de terceros).",
+        "Aislar la llamada tras una interfaz con implementacion por SO.",
+        "Probar en ambos SO."
+      ]
     },
 
     {
@@ -260,7 +372,14 @@
       "esBloqueante": true,
       "alternativaLinux": "COM no esta disponible en Linux. Abstraer detras de una interfaz y proveer una implementacion multiplataforma, o eliminar la funcionalidad.",
       "esfuerzo": { "optimista": 4, "masProbable": 20, "pesimista": 80 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar la interfaz/coclass COM importada.",
+        "Abstraer el servicio tras una interfaz .NET multiplataforma.",
+        "En Windows implementar con COM; en Linux con una alternativa nativa o eliminar.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "COM-COCLASS",
@@ -271,7 +390,14 @@
       "esBloqueante": true,
       "alternativaLinux": "COM no disponible en Linux: rediseno necesario.",
       "esfuerzo": { "optimista": 4, "masProbable": 20, "pesimista": 80 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Localizar la instanciacion de la coclass COM.",
+        "Sustituir por una fabrica/abstraccion multiplataforma.",
+        "Proveer implementacion Windows (COM) y Linux, o eliminar.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "COM-MARSHAL-ACTIVEOBJECT",
@@ -282,7 +408,14 @@
       "esBloqueante": true,
       "alternativaLinux": "No disponible en Linux: eliminar dependencia de objetos COM en ejecucion.",
       "esfuerzo": { "optimista": 3, "masProbable": 12, "pesimista": 40 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Localizar la obtencion de objetos COM en ejecucion.",
+        "Redisenar para no depender de objetos COM activos.",
+        "Si es imprescindible en Windows, aislar tras una interfaz.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "COM-OFFICE-INTEROP",
@@ -293,7 +426,15 @@
       "esBloqueante": true,
       "alternativaLinux": "Automatizacion de Office no disponible en Linux. Usar librerias multiplataforma (por ejemplo generacion directa OpenXML, ClosedXML para xlsx) o un servicio externo.",
       "esfuerzo": { "optimista": 8, "masProbable": 30, "pesimista": 100 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "notaComun": "La generacion documental sin Office (OpenXML/ClosedXML) es comun a ambos SO.",
+      "pasosRemediacion": [
+        "Identificar que produce la automatizacion de Office (Word/Excel).",
+        "Sustituir por generacion directa: OpenXML SDK, ClosedXML (xlsx) o similar.",
+        "Eliminar la dependencia de Microsoft.Office.Interop.",
+        "Probar la generacion en Windows y Linux."
+      ]
     },
 
     {
@@ -305,7 +446,14 @@
       "esBloqueante": true,
       "alternativaLinux": "WPF no se ejecuta en Linux. La libreria de negocio no debe referenciarlo: desacoplar la UI. Para UI multiplataforma evaluar Avalonia UI.",
       "esfuerzo": { "optimista": 8, "masProbable": 24, "pesimista": 80 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Desacoplar la logica de negocio del WPF hacia el core comun.",
+        "Mantener WPF solo en el ejecutable Windows.",
+        "Implementar la UI Linux con Avalonia (MVVM), reutilizando ViewModels.",
+        "Validar en Windows (WPF) y Linux (Avalonia)."
+      ]
     },
     {
       "id": "ASM-WPF-PRESENTATIONCORE",
@@ -316,7 +464,14 @@
       "esBloqueante": true,
       "alternativaLinux": "WPF no portable a Linux. Desacoplar de la libreria de negocio.",
       "esfuerzo": { "optimista": 8, "masProbable": 24, "pesimista": 80 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "pasosRemediacion": [
+        "Desacoplar la logica de negocio del WPF hacia el core comun.",
+        "Mantener WPF solo en el ejecutable Windows.",
+        "Implementar la UI Linux con Avalonia (MVVM), reutilizando ViewModels.",
+        "Validar en Windows (WPF) y Linux (Avalonia)."
+      ]
     },
     {
       "id": "ASM-WPF-WINDOWSBASE",
@@ -327,7 +482,15 @@
       "esBloqueante": true,
       "alternativaLinux": "Contiene tipos ligados a Windows (Dispatcher, DependencyObject). Desacoplar; algunos tipos (p. ej. ObservableCollection) tienen equivalentes portables en el BCL.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "RedisenoUI",
+      "notaComun": "Algunos tipos (p. ej. ObservableCollection) ya viven en el BCL comun; solo Dispatcher/DependencyObject atan a WPF.",
+      "pasosRemediacion": [
+        "Separar los tipos portables del BCL de los ligados a WPF (Dispatcher, DependencyObject).",
+        "Mover la logica al core comun usando tipos del BCL.",
+        "Dejar lo dependiente de WPF en la capa UI Windows.",
+        "Validar en ambos SO."
+      ]
     },
     {
       "id": "ASM-WINFORMS",
@@ -357,7 +520,14 @@
       "esBloqueante": false,
       "alternativaLinux": "En Linux lanza PlatformNotSupportedException. Migrar a ImageSharp o SkiaSharp.",
       "esfuerzo": { "optimista": 3, "masProbable": 12, "pesimista": 40 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Localizar el uso de System.Drawing (imagenes, graficos).",
+        "Migrar a ImageSharp o SkiaSharp (multiplataforma).",
+        "Eliminar la referencia a System.Drawing.Common.",
+        "Probar el procesamiento de imagenes en ambos SO."
+      ]
     },
     {
       "id": "ASM-REGISTRY",
@@ -368,7 +538,14 @@
       "esBloqueante": false,
       "alternativaLinux": "El registro no existe en Linux. Externalizar la configuracion a appsettings.json / variables de entorno / almacen de secretos.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Inventariar el acceso al Registro.",
+        "Externalizar la configuracion a appsettings.json / variables de entorno via IConfiguration.",
+        "Lo que deba seguir en Registro en Windows, aislar tras ISettingsStore.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "ASM-WMI",
@@ -379,7 +556,14 @@
       "esBloqueante": true,
       "alternativaLinux": "WMI es exclusivo de Windows. En Linux obtener la informacion equivalente via /proc, /sys o librerias del sistema.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar que informacion se obtiene por WMI.",
+        "Abstraer tras una interfaz de consulta del sistema.",
+        "En Linux implementar via /proc, /sys o librerias del sistema.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "ASM-DIRECTORYSERVICES",
@@ -390,7 +574,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Integracion nativa con AD no disponible. Usar LDAP multiplataforma (System.DirectoryServices.Protocols tiene soporte parcial) o Novell.Directory.Ldap.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Localizar las consultas a Active Directory.",
+        "Migrar a LDAP multiplataforma (System.DirectoryServices.Protocols o Novell.Directory.Ldap).",
+        "Revisar autenticacion y filtros LDAP.",
+        "Probar contra el directorio en ambos SO."
+      ]
     },
     {
       "id": "ASM-SERVICEPROCESS",
@@ -401,7 +592,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Servicios de Windows no aplican. En Linux usar systemd; para hosting usar Microsoft.Extensions.Hosting.Systemd.",
       "esfuerzo": { "optimista": 3, "masProbable": 10, "pesimista": 30 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Identificar la interaccion con servicios de Windows.",
+        "Para hosting, usar Microsoft.Extensions.Hosting; en Linux integrar con systemd.",
+        "Sustituir la gestion de servicios por el mecanismo del SO destino.",
+        "Probar el arranque como servicio/daemon en ambos SO."
+      ]
     },
     {
       "id": "ASM-EVENTLOG",
@@ -412,7 +610,15 @@
       "esBloqueante": false,
       "alternativaLinux": "El Visor de eventos no existe en Linux. Migrar el logging a un framework multiplataforma (Serilog, Microsoft.Extensions.Logging) con salida a fichero/syslog.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 20 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "notaComun": "Un unico framework de logging (Serilog/MEL) sirve para ambos SO.",
+      "pasosRemediacion": [
+        "Sustituir la escritura al EventLog por un framework de logging multiplataforma (Serilog, Microsoft.Extensions.Logging).",
+        "Configurar salida a fichero/syslog en Linux y la que corresponda en Windows.",
+        "Eliminar la referencia a System.Diagnostics.EventLog.",
+        "Probar el logging en ambos SO."
+      ]
     },
     {
       "id": "ASM-PERFORMANCECOUNTER",
@@ -423,7 +629,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Contadores de rendimiento de Windows no disponibles. Usar EventCounters / System.Diagnostics.Metrics multiplataforma.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Localizar los contadores de rendimiento usados.",
+        "Migrar a EventCounters / System.Diagnostics.Metrics (multiplataforma).",
+        "Adaptar la recogida/exportacion de metricas.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "ASM-MSMQ",
@@ -434,7 +647,14 @@
       "esBloqueante": true,
       "alternativaLinux": "MSMQ es exclusivo de Windows y no tiene port a .NET moderno. Migrar a RabbitMQ, Azure Service Bus u otra cola multiplataforma.",
       "esfuerzo": { "optimista": 8, "masProbable": 30, "pesimista": 100 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Identificar el uso de colas MSMQ.",
+        "Migrar a una cola multiplataforma (RabbitMQ, Azure Service Bus, etc.).",
+        "Adaptar el envio/recepcion de mensajes al nuevo broker.",
+        "Probar la mensajeria en ambos SO."
+      ]
     },
     {
       "id": "ASM-SPEECH",
@@ -445,7 +665,14 @@
       "esBloqueante": true,
       "alternativaLinux": "APIs de voz de Windows no portables. Usar servicio de voz multiplataforma (motor externo/cloud).",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Identificar el uso de sintesis/reconocimiento de voz.",
+        "Sustituir por un servicio de voz multiplataforma (motor externo/cloud).",
+        "Aislar el acceso a voz tras una interfaz.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "ASM-WINDOWS-SYSTEMEVENTS",
@@ -456,7 +683,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Eventos del sistema de Windows no disponibles. Suprimir o sustituir por mecanismos especificos de Linux si aplica.",
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 16 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar a que eventos del sistema se suscribe (sesion, energia, tema).",
+        "Abstraer tras una interfaz de eventos del sistema.",
+        "En Linux implementar con los mecanismos disponibles o dejar no-op.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "ASM-WCF-SERVER",
@@ -467,7 +701,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Cliente WCF: usar paquetes System.ServiceModel.* (multiplataforma). Servidor WCF: migrar a CoreWCF o a gRPC/ASP.NET Core.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 60 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "notaComun": "El cliente WCF tiene paquetes multiplataforma (System.ServiceModel.*); solo el hosting servidor ata a Windows.",
+      "pasosRemediacion": [
+        "Separar cliente WCF (portable) de hosting servidor (Windows).",
+        "Cliente: usar los paquetes System.ServiceModel.* multiplataforma.",
+        "Servidor: migrar a CoreWCF o a gRPC/ASP.NET Core.",
+        "Probar cliente y servidor en ambos SO."
+      ]
     },
 
     {
@@ -479,7 +721,14 @@
       "esBloqueante": false,
       "alternativaLinux": "La API lanzara PlatformNotSupportedException en Linux. Buscar equivalente multiplataforma o aislar con guardas por SO.",
       "esfuerzo": { "optimista": 1, "masProbable": 6, "pesimista": 20 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Revisar cada miembro marcado como solo-Windows.",
+        "Buscar un equivalente multiplataforma; si existe, sustituir.",
+        "Si no existe, aislar tras una interfaz por SO y guardar con OperatingSystem.IsWindows().",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "ATTR-UNSUPPORTEDOSPLATFORM-LINUX",
@@ -490,7 +739,14 @@
       "esBloqueante": false,
       "alternativaLinux": "API declarada no soportada en Linux. Sustituir o aislar.",
       "esfuerzo": { "optimista": 1, "masProbable": 6, "pesimista": 20 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Revisar cada miembro declarado no soportado en Linux.",
+        "Sustituir por alternativa multiplataforma o aislar por SO.",
+        "Guardar el uso con OperatingSystem.IsWindows() donde aplique.",
+        "Probar en ambos SO."
+      ]
     },
 
     {
@@ -522,7 +778,14 @@
       "esBloqueante": true,
       "alternativaLinux": "DPAPI es exclusivo de Windows. Sustituir el esquema de proteccion de secretos (por ejemplo AES con clave gestionada externamente, o un secrets manager). Cuidado: los datos ya protegidos con DPAPI no se pueden descifrar en Linux.",
       "esfuerzo": { "optimista": 4, "masProbable": 12, "pesimista": 40 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Identificar los secretos protegidos con DPAPI.",
+        "Sustituir el esquema por AES con clave gestionada externamente o un secrets manager.",
+        "IMPORTANTE: los datos ya protegidos con DPAPI no se pueden descifrar en Linux; planificar el re-cifrado.",
+        "Probar el ciclo proteger/desproteger en ambos SO."
+      ]
     },
     {
       "id": "CRYPTO-CNG",
@@ -533,7 +796,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Usar las factorias multiplataforma (RSA.Create(), ECDsa.Create()) en lugar de las variantes *Cng.",
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 16 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "Usar las factorias multiplataforma (RSA.Create, ECDsa.Create) hace el codigo comun a ambos SO.",
+      "pasosRemediacion": [
+        "Sustituir las variantes *Cng (RSACng, ECDsaCng) por RSA.Create()/ECDsa.Create().",
+        "Verificar parametros y formatos de clave.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "CRYPTO-CSP",
@@ -544,7 +814,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Funciona parcialmente pero se recomienda migrar a RSA.Create()/Aes.Create() (implementacion multiplataforma).",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "RSA.Create()/Aes.Create() son la implementacion multiplataforma.",
+      "pasosRemediacion": [
+        "Sustituir *CryptoServiceProvider por las factorias RSA.Create()/Aes.Create().",
+        "Revisar el uso de claves y algoritmos.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "CRYPTO-WINCERTSTORE",
@@ -555,7 +832,14 @@
       "esBloqueante": false,
       "alternativaLinux": "El almacen de certificados en Linux se apoya en OpenSSL/ficheros. Cargar certificados desde fichero (PEM/PFX) en lugar del almacen del SO.",
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 16 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "pasosRemediacion": [
+        "Localizar el acceso al almacen de certificados (X509Store).",
+        "Cargar los certificados desde fichero (PEM/PFX) en lugar del almacen del SO.",
+        "Externalizar la ruta/credenciales del certificado a configuracion.",
+        "Probar en ambos SO."
+      ]
     },
 
     {
@@ -606,7 +890,15 @@
       "esBloqueante": true,
       "alternativaLinux": "Dispatcher es parte de WPF (Windows). En logica de negocio, reemplazar la sincronizacion con contexto por async/await, IProgress<T> o SynchronizationContext neutro.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "En el core, reemplazar la sincronizacion por async/await lo vuelve comun; cada UI usa el Dispatcher de su framework.",
+      "pasosRemediacion": [
+        "Localizar los usos de Dispatcher en logica de negocio.",
+        "Reemplazar por async/await, IProgress<T> o un SynchronizationContext neutro.",
+        "Dejar el marshalling a UI en la capa de presentacion de cada SO.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "SYNC-NAMED-MUTEX",
@@ -617,7 +909,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Los mutex con nombre existen en Linux (.NET los soporta con /tmp) pero la semantica entre procesos/usuarios y la limpieza difieren. Revisar el patron de single-instance.",
       "esfuerzo": { "optimista": 0.5, "masProbable": 2, "pesimista": 8 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Determinar el proposito (normalmente single-instance).",
+        "Si es in-process, usar un lock gestionado.",
+        "Si es system-wide, abstraer tras IInterProcessLock (named mutex en Windows; file lock en Linux) y revisar la semantica.",
+        "Probar el escenario en ambos SO."
+      ]
     },
     {
       "id": "SYNC-NAMED-SEMAPHORE",
@@ -647,7 +946,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Los EventWaitHandle con nombre no estan soportados entre procesos en Linux. Rediseñar la senalizacion IPC.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Determinar si la senalizacion es in-process o entre procesos.",
+        "In-process: usar ManualResetEventSlim/AutoResetEvent.",
+        "Entre procesos: abstraer la senalizacion IPC (named pipe, socket, fichero) por SO.",
+        "Probar la sincronizacion en ambos SO."
+      ]
     },
 
     {
@@ -659,7 +965,14 @@
       "esBloqueante": false,
       "alternativaLinux": "El interprete de comandos difiere (bash/sh). Sustituir el comando o abstraer la ejecucion por SO. Preferir APIs gestionadas cuando sea posible.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Localizar la invocacion de cmd.exe.",
+        "Preferir una API gestionada equivalente cuando exista.",
+        "Si hay que ejecutar shell, abstraer el interprete por SO (cmd en Windows, sh/bash en Linux).",
+        "Probar la ejecucion en ambos SO."
+      ]
     },
     {
       "id": "PROC-POWERSHELL",
@@ -670,7 +983,14 @@
       "esBloqueante": false,
       "alternativaLinux": "PowerShell Core (pwsh) existe en Linux pero el ejecutable cambia y los scripts pueden usar cmdlets solo-Windows. Revisar cada script.",
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 20 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Revisar cada script y su ejecutable (powershell.exe vs pwsh).",
+        "Comprobar que los cmdlets usados existan en PowerShell Core (Linux).",
+        "Abstraer la ruta del ejecutable por SO o sustituir por logica gestionada.",
+        "Probar los scripts en ambos SO."
+      ]
     },
     {
       "id": "PROC-WINEXE",
@@ -681,7 +1001,14 @@
       "esBloqueante": true,
       "alternativaLinux": "Utilidades de linea de comandos de Windows sin equivalente directo. Sustituir por comandos/logica de Linux o APIs gestionadas.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Identificar las utilidades Windows invocadas (reg, sc, net, wmic, etc.).",
+        "Sustituir por APIs gestionadas o por el comando equivalente en Linux.",
+        "Abstraer la ejecucion por SO donde no haya equivalente directo.",
+        "Probar en ambos SO."
+      ]
     },
 
     {
@@ -693,7 +1020,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Linux no usa letras de unidad. Externalizar rutas a configuracion y usar Path.Combine.",
       "esfuerzo": { "optimista": 0.5, "masProbable": 3, "pesimista": 12 },
-      "confianza": "Baja"
+      "confianza": "Baja",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "Rutas relativas + Path.Combine + configuracion externa funcionan en ambos SO.",
+      "pasosRemediacion": [
+        "REVISION MANUAL (senal debil): confirmar que es una ruta real.",
+        "Externalizar la ruta a configuracion en vez de fijar una unidad de Windows.",
+        "Construir rutas con Path.Combine y evitar letras de unidad.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "FS-BACKSLASH-PATH",
@@ -704,7 +1039,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Linux usa '/'. Sustituir concatenaciones por Path.Combine y Path.DirectorySeparatorChar. Alta probabilidad de falsos positivos: revisar.",
       "esfuerzo": { "optimista": 0.25, "masProbable": 2, "pesimista": 8 },
-      "confianza": "Baja"
+      "confianza": "Baja",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "Path.Combine/Path.DirectorySeparatorChar generan la ruta correcta en cada SO.",
+      "pasosRemediacion": [
+        "REVISION MANUAL (alta tasa de falsos positivos): confirmar que es una ruta.",
+        "Sustituir las concatenaciones de ruta por Path.Combine.",
+        "Usar Path.DirectorySeparatorChar donde haga falta.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "FS-SPECIALFOLDER-WINDOWS",
@@ -715,7 +1058,15 @@
       "esBloqueante": false,
       "alternativaLinux": "Algunas carpetas especiales no tienen equivalente en Linux o devuelven rutas distintas. Revisar cada uso y externalizar rutas.",
       "esfuerzo": { "optimista": 0.5, "masProbable": 2, "pesimista": 8 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "Environment.GetFolderPath existe en ambos SO, pero algunas carpetas devuelven rutas distintas o vacias.",
+      "pasosRemediacion": [
+        "Revisar cada SpecialFolder usada y su equivalencia en Linux.",
+        "Externalizar a configuracion las rutas que no tengan equivalente.",
+        "Validar que la ruta obtenida existe y es escribible en ambos SO.",
+        "Probar en ambos SO."
+      ]
     },
 
     {
@@ -727,7 +1078,15 @@
       "esBloqueante": true,
       "alternativaLinux": "ODP.NET unmanaged es solo Windows. Migrar a Oracle.ManagedDataAccess.Core (100% gestionado, multiplataforma). Revisar diferencias de API y de cadena de conexion.",
       "esfuerzo": { "optimista": 4, "masProbable": 12, "pesimista": 32 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "notaComun": "Oracle.ManagedDataAccess.Core es comun a Windows y Linux.",
+      "pasosRemediacion": [
+        "Anadir el paquete Oracle.ManagedDataAccess.Core.",
+        "Reemplazar Oracle.DataAccess.Client por Oracle.ManagedDataAccess.Client.",
+        "Revisar diferencias de API y de cadena de conexion (TNS, EZConnect).",
+        "Probar la conectividad y consultas en Windows y Linux."
+      ]
     },
     {
       "id": "ORACLE-SYSTEM-DATA-ORACLECLIENT",
@@ -758,7 +1117,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Es gestionado pero la variante clasica apunta a .NET Framework. Para .NET 8/Linux usar el paquete Oracle.ManagedDataAccess.Core.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "ReemplazarDependencia",
+      "notaComun": "El core net8.0 debe usar el paquete .Core; el clasico apunta a .NET Framework.",
+      "pasosRemediacion": [
+        "Sustituir el paquete Oracle.ManagedDataAccess por Oracle.ManagedDataAccess.Core.",
+        "Verificar el TFM del proyecto (net8.0).",
+        "Probar consultas en ambos SO."
+      ]
     },
     {
       "id": "ORACLE-MANAGED-CORE",
@@ -769,7 +1135,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Apto para Linux. No requiere accion; solo validar version y funcionalidad usada.",
       "esfuerzo": { "optimista": 0, "masProbable": 0, "pesimista": 2 },
-      "confianza": "Alta"
+      "confianza": "Alta",
+      "estrategiaSeparacion": "Comun",
+      "notaComun": "Ya es multiplataforma: vive en el core net8.0 sin cambios.",
+      "pasosRemediacion": [
+        "Validar la version del paquete Oracle.ManagedDataAccess.Core.",
+        "Revisar la funcionalidad usada por si hubiera notas de compatibilidad.",
+        "Probar en Linux para confirmar."
+      ]
     },
 
     {
@@ -781,7 +1154,14 @@
       "esBloqueante": false,
       "alternativaLinux": "Estas sobrecargas lanzan PlatformNotSupportedException en Linux. Eliminar o proteger con guarda por SO.",
       "esfuerzo": { "optimista": 0.25, "masProbable": 1, "pesimista": 4 },
-      "confianza": "Media"
+      "confianza": "Media",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Localizar las llamadas a Console.Beep(freq,dur)/SetWindowSize/SetBufferSize.",
+        "Eliminarlas o protegerlas con OperatingSystem.IsWindows().",
+        "Sustituir por alternativa multiplataforma si la funcionalidad es necesaria.",
+        "Probar en ambos SO."
+      ]
     },
     {
       "id": "MISC-WIN32EXCEPTION",
@@ -792,7 +1172,14 @@
       "esBloqueante": false,
       "alternativaLinux": "No es bloqueante por si mismo, pero indica interoperabilidad Win32 cercana: revisar el contexto donde se captura.",
       "esfuerzo": { "optimista": 0, "masProbable": 1, "pesimista": 4 },
-      "confianza": "Baja"
+      "confianza": "Baja",
+      "estrategiaSeparacion": "AbstraerPorPlataforma",
+      "pasosRemediacion": [
+        "Revisar el contexto donde se captura Win32Exception (indica interop Win32 cercana).",
+        "Comprobar la portabilidad del codigo que la lanza.",
+        "Adaptar el manejo de errores al equivalente multiplataforma.",
+        "No es bloqueante por si mismo: priorizar segun el codigo asociado."
+      ]
     }
   ]
 }
