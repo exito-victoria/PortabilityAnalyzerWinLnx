@@ -162,7 +162,7 @@ con trazabilidad completa, clasificación y esfuerzo. Conserva **cada ocurrencia
 - `--rules <catálogo.json>` y `--schema <schema.json>` (valida el catálogo antes de analizar).
 - `--output <ruta base>` y `--format <json|markdown|word|all|lista>`.
 - `--assume-third-party`, `--third-party-factor <n>` para el factor de incertidumbre cuando no hay
-  resolución de proyecto.
+  resolución de proyecto; `--testing-factor <n>` para la fracción de Pruebas y CI (0.25 por defecto).
 - Las carpetas intermedias `obj/` (con `ref/`/`refint/`) se excluyen; los apphost `.exe` de .NET
   moderno se descartan si existe su `.dll` hermano.
 
@@ -187,14 +187,20 @@ con trazabilidad completa, clasificación y esfuerzo. Conserva **cada ocurrencia
   dedup por nombre de ensamblado; catálogo validado por schema; informes **Markdown y Word** con
   **esfuerzo** y **alternativa Linux** por dependencia; **una ejecución → varios informes**; **tablas
   Word ajustadas a la hoja** (apaisado + layout fijo).
-- **Fase 1 — Catálogo enriquecido.** Añadir `pasosRemediacion`, `estrategiaSeparacion`, `notaComun`
-  y desglose de esfuerzo; actualizar el JSON Schema; poblar las reglas.
-- **Fase 2 — Modelo de coste multiplataforma.** Esfuerzo por **buckets** (separación core / UI Linux
-  Avalonia / reemplazo de dependencias / pruebas y CI en ambos SO) y resumen ejecutivo por bucket.
-- **Fase 3 — Terceros en profundidad.** Desglose de dependencias nativas/P-Invoke de las DLLs de
-  terceros y propuesta de reemplazo multiplataforma; marca de riesgo por no tener fuentes.
-- **Fase 4 — Arquitectura destino.** Recomendación concreta: core `net8.0` compartido + WPF (Windows)
-  + Avalonia (Linux), con la capa de abstracción por plataforma y su plan de migración.
+- **Fase 1 — Hecho.** Catálogo enriquecido: `pasosRemediacion`, `estrategiaSeparacion`
+  (`Comun`/`AbstraerPorPlataforma`/`ReemplazarDependencia`/`RedisenoUI`) y `notaComun`; JSON Schema
+  ampliado; **las 62 reglas pobladas**. En el informe, cada dependencia muestra **dónde se encontró**
+  (ubicación), estrategia, alternativa Linux y **pasos de remediación** (para todos los issues, no
+  solo bloqueantes).
+- **Fase 2 — Hecho.** Modelo de coste por **buckets** (adaptación a núcleo común · separación por
+  plataforma · reemplazo de dependencias · UI Linux Avalonia · **pruebas y CI**) con resumen ejecutivo
+  O/Media/P y %. `--testing-factor` configurable (0.25 por defecto), documentado en el informe.
+- **Fase 3 — Hecho.** Análisis de terceros (sin fuentes): inventario de **dependencias nativas del
+  SO** por DLL de terceros (P/Invoke, por sitio de llamada), clasificadas (sistema Windows vs nativa
+  de terceros a verificar en Linux), marca de riesgo y **reemplazo sugerido** (p. ej. Oracle.DataAccess
+  → Oracle.ManagedDataAccess.Core).
+- **Fase 4 — Pendiente.** Recomendación concreta de **arquitectura destino**: core `net8.0` compartido
+  + WPF (Windows) + Avalonia (Linux), con la capa de abstracción por plataforma y su plan de migración.
 
 ---
 

@@ -1,17 +1,23 @@
 # PortabilityAnalyzer
 
-Herramienta de consola (.NET 8) que analiza estáticamente los ensamblados de una solución
-Windows (WPF / Oracle) y evalúa la viabilidad de portar la lógica de negocio a Linux.
+Herramienta de consola (.NET 8) que analiza estáticamente los ensamblados de una solución Windows
+(WPF / Oracle) y **estima el impacto y el coste de hacerla multiplataforma en .NET 8** (Windows +
+Linux): un **core común** compartido, manteniendo el UI WPF en Windows e implementando el UI de Linux
+con **Avalonia**. Ver [docs/especificacion-multiplataforma.md](docs/especificacion-multiplataforma.md)
+para el objetivo, el modelo de estimación y el plan por fases.
 
 Detecta dependencias del sistema operativo Windows (P/Invoke, COM, referencias a ensamblados
 solo-Windows, atributos de plataforma, registro, criptografía CAPI/CNG/DPAPI, identidad de
 Windows, hilos/sincronización, invocación de comandos del SO, supuestos del sistema de ficheros
-y driver Oracle), clasifica cada hallazgo por severidad y estima el esfuerzo de migración con un
-modelo de tres puntos (PERT).
+y driver Oracle). Para cada dependencia indica **dónde se encontró**, su **estrategia de separación**
+(común / abstraer por plataforma / reemplazar / rediseño de UI), la **alternativa Linux**, los
+**pasos de remediación** y el **esfuerzo** (PERT). El informe incluye un **resumen de coste por
+bucket** y un **análisis en profundidad de los ensamblados de terceros** (sin fuentes).
 
 > **Estado: funcional.** Compila (SDK .NET 10 instalado; proyectos en `net8.0`) y se ha ejecutado
-> sobre soluciones reales (WPF-Samples y la propia solución). Restaurar paquetes NuGet al abrirlo en
-> Visual Studio 2022 y **verificar las versiones** de los `.csproj` si difieren del entorno.
+> sobre soluciones reales (WPF-Samples, WinForms/Oracle y la propia solución). Restaurar paquetes
+> NuGet al abrirlo en Visual Studio 2022 y **verificar las versiones** de los `.csproj` si difieren
+> del entorno.
 
 ## Estructura
 
@@ -55,7 +61,7 @@ PortabilityAnalyzer.Cli \
   --schema  rules/portability-rules.schema.json \
   --output  informe \
   --format  word,markdown \
-  [--assume-third-party] [--third-party-factor <n>]
+  [--assume-third-party] [--third-party-factor <n>] [--testing-factor <n>]
 ```
 
 `--format` acepta `json`, `markdown`, `word`, `all`, o una **lista separada por comas**. Una sola
@@ -79,6 +85,12 @@ mal formado detiene la ejecución con el detalle de los errores.
 Las salidas se **deduplican por nombre de ensamblado**: una misma DLL copiada en varios `bin` se
 analiza (y aparece en el informe) una sola vez. Las carpetas intermedias `obj/` (con sus *reference
 assemblies* `ref/` y `refint/`) se excluyen del escaneo.
+
+**Coste multiplataforma y terceros.** El informe abre con un **resumen de coste por bucket**
+(adaptación a núcleo común · separación por plataforma · reemplazo de dependencias · UI Linux
+Avalonia · pruebas y CI) y una sección de **análisis de terceros** que inventaria las dependencias
+nativas del SO de cada DLL de terceros y sugiere su reemplazo. `--testing-factor <n>` fija la fracción
+del esfuerzo de desarrollo imputada a Pruebas y CI (0.25 por defecto).
 
 **Formatos de salida:** `json` (contrato para integraciones, una entrada por ocurrencia),
 `markdown` (legible, ocurrencias agregadas) y `word` (`.docx` nativo vía OpenXML). Markdown y Word
@@ -106,9 +118,11 @@ muestran, por dependencia, el **esfuerzo de adaptación** y la **alternativa Lin
 
 ## Limitaciones conocidas / TODO
 
-- El `IProjectDiscovery` para `.sln` (`SolutionProjectDiscovery`) usa una heurística por **nombre de
+- El `IProjectDiscovery` para `.sln`/`.csproj` (`ProjectDiscovery`) usa una heurística por **nombre de
   ensamblado**: casa el nombre del proyecto (`AssemblyName` o nombre del `.csproj`) con las DLL de
   `bin`. No resuelve `ProjectReference` transitivas ni la carpeta de salida exacta por configuración.
+- **Fase 4 pendiente**: recomendación de arquitectura destino (core `net8.0` + WPF/Windows +
+  Avalonia/Linux) y su plan de migración.
 - El detector de API (`ApiCallDetector`) marca constructores como `Mutex::.ctor` sin distinguir aún
   la sobrecarga **con nombre**; refinar inspeccionando los argumentos para reducir falsos positivos.
 - Los esfuerzos del catálogo son **semilla orientativa**: recalibrar con datos reales.
@@ -116,8 +130,17 @@ muestran, por dependencia, el **esfuerzo de adaptación** y la **alternativa Lin
 
 ### Hecho recientemente
 
-- **`IProjectDiscovery`** desde `.sln` con detección de terceros por ensamblado.
-- Exclusión de carpetas `obj/` en el descubrimiento (evita contar duplicados solo-metadatos).
-- Reglas de confianza **Baja** → sección "revisión manual", **excluidas** del esfuerzo y la severidad.
-- Catálogo normalizado: `esBloqueante: true` ⟹ `severidad: "Bloqueante"`.
-- Escape de celdas en el informe Markdown y `matchTimeout` en las regex del `PatternMatcher`.
+Trabajo hacia el objetivo **multiplataforma** (rama `multiplataformWnLx`), por fases:
+
+- **Fase 0** — Descubrimiento `.sln`/`.csproj`, exclusión de `obj/` y apphosts, dedup por nombre de
+  ensamblado, dos informes en una ejecución y **tablas Word ajustadas a la hoja** (apaisado + fijo).
+- **Fase 1** — Catálogo con `estrategiaSeparacion`, `pasosRemediacion` y `notaComun` (**62 reglas**);
+  en el informe, **ubicación**, estrategia, alternativa y **pasos de remediación** por dependencia.
+- **Fase 2** — **Coste por bucket** (núcleo común / separación / reemplazo / UI Linux / pruebas y CI)
+  con `--testing-factor` configurable.
+- **Fase 3** — **Análisis de terceros** (sin fuentes): dependencias nativas del SO por DLL y reemplazo
+  sugerido.
+
+Base previa: reglas de confianza **Baja** → "revisión manual" (excluidas del esfuerzo); catálogo
+normalizado (`esBloqueante` ⟹ `severidad: "Bloqueante"`); escape de celdas Markdown y `matchTimeout`
+(anti-ReDoS) en `PatternMatcher`.
