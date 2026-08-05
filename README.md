@@ -121,8 +121,6 @@ muestran, por dependencia, el **esfuerzo de adaptación** y la **alternativa Lin
 - El `IProjectDiscovery` para `.sln`/`.csproj` (`ProjectDiscovery`) usa una heurística por **nombre de
   ensamblado**: casa el nombre del proyecto (`AssemblyName` o nombre del `.csproj`) con las DLL de
   `bin`. No resuelve `ProjectReference` transitivas ni la carpeta de salida exacta por configuración.
-- **Fase 4 pendiente**: recomendación de arquitectura destino (core `net8.0` + WPF/Windows +
-  Avalonia/Linux) y su plan de migración.
 - El detector de API (`ApiCallDetector`) marca constructores como `Mutex::.ctor` sin distinguir aún
   la sobrecarga **con nombre**; refinar inspeccionando los argumentos para reducir falsos positivos.
 - Los esfuerzos del catálogo son **semilla orientativa**: recalibrar con datos reales.
@@ -140,6 +138,9 @@ Trabajo hacia el objetivo **multiplataforma** (rama `multiplataformWnLx`), por f
   con `--testing-factor` configurable.
 - **Fase 3** — **Análisis de terceros** (sin fuentes): dependencias nativas del SO por DLL y reemplazo
   sugerido.
+- **Fase 4** — **Recomendación de arquitectura destino** y plan de migración: estructura de proyectos
+  (`Core`/`Abstractions`/`Platform.*`/`App.Windows`-WPF/`App.Linux`-Avalonia), capa de abstracción
+  derivada de los hallazgos y pasos de migración.
 
 Base previa: reglas de confianza **Baja** → "revisión manual" (excluidas del esfuerzo); catálogo
 normalizado (`esBloqueante` ⟹ `severidad: "Bloqueante"`); escape de celdas Markdown y `matchTimeout`

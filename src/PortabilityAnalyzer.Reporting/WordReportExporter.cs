@@ -41,6 +41,7 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para(string.Empty));
 
         AppendBucketSummary(b, report.CostByBucket);
+        AppendArchitectureSection(b, report);
         AppendThirdPartySection(b, report);
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
@@ -119,6 +120,33 @@ public sealed class WordReportExporter : IReportExporter
             new PageMargin { Top = Margin, Bottom = Margin, Left = (uint)Margin, Right = (uint)Margin, Header = 360, Footer = 360, Gutter = 0 }));
 
         mainPart.Document.Save();
+    }
+
+    /// <summary>Recomendacion de arquitectura destino y plan de migracion (sintetizado del analisis).</summary>
+    private static void AppendArchitectureSection(Body b, AnalysisReport report)
+    {
+        var plan = ArchitectureRecommendation.Build(report);
+
+        b.Append(Para("Arquitectura destino recomendada y plan de migracion", bold: true, sizeHalfPt: 28));
+        b.Append(Para($"Objetivo: core .NET 8 comun + WPF en Windows y Avalonia en Linux. Esfuerzo total estimado (con Pruebas y CI): {plan.TotalWithTesting.Media:0.#} h (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}."));
+
+        b.Append(Para("Estructura de proyectos propuesta", bold: true, sizeHalfPt: 24));
+        b.Append(BuildTable(
+            new[] { "Proyecto", "TFM", "Proposito" },
+            new[] { 2.5, 1.5, 4.0 },
+            plan.Projects.Select(p => new[] { p.Name, p.Tfm, p.Purpose })));
+
+        if (plan.Abstractions.Count > 0)
+        {
+            b.Append(Para("Capa de abstraccion (interfaces por plataforma)", bold: true, sizeHalfPt: 24));
+            foreach (var a in plan.Abstractions)
+                b.Append(Para($"- {a}"));
+        }
+
+        b.Append(Para("Plan de migracion", bold: true, sizeHalfPt: 24));
+        for (int i = 0; i < plan.MigrationSteps.Count; i++)
+            b.Append(Para($"{i + 1}. {plan.MigrationSteps[i]}"));
+        b.Append(Para(string.Empty));
     }
 
     /// <summary>Analisis en profundidad de los ensamblados de terceros (sin fuentes).</summary>

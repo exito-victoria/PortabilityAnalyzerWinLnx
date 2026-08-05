@@ -199,8 +199,11 @@ con trazabilidad completa, clasificación y esfuerzo. Conserva **cada ocurrencia
   SO** por DLL de terceros (P/Invoke, por sitio de llamada), clasificadas (sistema Windows vs nativa
   de terceros a verificar en Linux), marca de riesgo y **reemplazo sugerido** (p. ej. Oracle.DataAccess
   → Oracle.ManagedDataAccess.Core).
-- **Fase 4 — Pendiente.** Recomendación concreta de **arquitectura destino**: core `net8.0` compartido
-  + WPF (Windows) + Avalonia (Linux), con la capa de abstracción por plataforma y su plan de migración.
+- **Fase 4 — Hecho.** El informe genera una **recomendación de arquitectura destino** concreta:
+  estructura de proyectos (`Core` net8.0 · `Abstractions` · `Platform.Windows`/`Platform.Linux` ·
+  `App.Windows` WPF / `App.Linux` Avalonia), la **capa de abstracción** derivada de los hallazgos
+  (`ISettingsStore`, `IUserIdentity`, `IInterProcessLock`, `INativePlatform`, …) y un **plan de
+  migración** por pasos, con el esfuerzo total (incluidas Pruebas y CI) y el nº de bloqueantes.
 
 ---
 

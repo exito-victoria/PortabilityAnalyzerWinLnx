@@ -19,6 +19,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
 
         AppendBucketSummary(sb, report.CostByBucket);
+        AppendArchitectureSection(sb, report);
         AppendThirdPartySection(sb, report);
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
@@ -57,6 +58,40 @@ public sealed class MarkdownReportExporter : IReportExporter
         }
 
         File.WriteAllText(outputPath, sb.ToString());
+    }
+
+    /// <summary>Recomendacion de arquitectura destino y plan de migracion (sintetizado del analisis).</summary>
+    private static void AppendArchitectureSection(StringBuilder sb, AnalysisReport report)
+    {
+        var plan = ArchitectureRecommendation.Build(report);
+
+        sb.AppendLine("## Arquitectura destino recomendada y plan de migracion");
+        sb.AppendLine();
+        sb.AppendLine($"Objetivo: **core .NET 8 comun** + **WPF en Windows** y **Avalonia en Linux**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
+        sb.AppendLine();
+
+        sb.AppendLine("### Estructura de proyectos propuesta");
+        sb.AppendLine();
+        sb.AppendLine("| Proyecto | TFM | Proposito |");
+        sb.AppendLine("|----------|-----|-----------|");
+        foreach (var p in plan.Projects)
+            sb.AppendLine($"| {Cell(p.Name)} | {p.Tfm} | {Cell(p.Purpose)} |");
+        sb.AppendLine();
+
+        if (plan.Abstractions.Count > 0)
+        {
+            sb.AppendLine("### Capa de abstraccion (interfaces por plataforma)");
+            sb.AppendLine();
+            foreach (var a in plan.Abstractions)
+                sb.AppendLine($"- {a}");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("### Plan de migracion");
+        sb.AppendLine();
+        for (int i = 0; i < plan.MigrationSteps.Count; i++)
+            sb.AppendLine($"{i + 1}. {plan.MigrationSteps[i]}");
+        sb.AppendLine();
     }
 
     /// <summary>Analisis en profundidad de los ensamblados de terceros (sin fuentes): dependencias
