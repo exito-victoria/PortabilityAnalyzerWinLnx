@@ -15,8 +15,10 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
         sb.AppendLine($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}  ");
         sb.AppendLine($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}  ");
-        sb.AppendLine($"Esfuerzo total (horas) -> optimista: {report.TotalEffort.Optimista:0.#} | media: {report.TotalEffort.Media:0.#} | pesimista: {report.TotalEffort.Pesimista:0.#}");
+        sb.AppendLine($"Esfuerzo total de desarrollo (horas) -> optimista: {report.TotalEffort.Optimista:0.#} | media: {report.TotalEffort.Media:0.#} | pesimista: {report.TotalEffort.Pesimista:0.#}");
         sb.AppendLine();
+
+        AppendBucketSummary(sb, report.CostByBucket);
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
         {
@@ -54,6 +56,27 @@ public sealed class MarkdownReportExporter : IReportExporter
         }
 
         File.WriteAllText(outputPath, sb.ToString());
+    }
+
+    /// <summary>Resumen ejecutivo del coste por bucket multiplataforma (incluye Pruebas y CI).</summary>
+    private static void AppendBucketSummary(StringBuilder sb, IReadOnlyList<BucketEffort> buckets)
+    {
+        if (buckets.Count == 0) return;
+        var grand = buckets.Aggregate(EffortEstimate.Zero, (a, b) => a.Add(b.Effort));
+
+        sb.AppendLine("## Coste por bucket (multiplataforma)");
+        sb.AppendLine();
+        sb.AppendLine("| Bucket | Optimista | Media | Pesimista | % |");
+        sb.AppendLine("|--------|-----------|-------|-----------|---|");
+        foreach (var b in buckets)
+        {
+            var pct = grand.Media > 0 ? b.Effort.Media / grand.Media * 100 : 0;
+            sb.AppendLine($"| {CostBuckets.Text(b.Bucket)} | {b.Effort.Optimista:0.#} | {b.Effort.Media:0.#} | {b.Effort.Pesimista:0.#} | {pct:0} % |");
+        }
+        sb.AppendLine($"| **Total (con Pruebas y CI)** | {grand.Optimista:0.#} | {grand.Media:0.#} | {grand.Pesimista:0.#} | 100 % |");
+        sb.AppendLine();
+        sb.AppendLine("> Modelo: esfuerzo contado una vez por regla y ensamblado (PERT O/M/P), con factor de incertidumbre a los ensamblados de terceros. Los buckets de desarrollo se derivan de la estrategia de separacion de cada regla; Pruebas y CI es una fraccion transversal del esfuerzo de desarrollo.");
+        sb.AppendLine();
     }
 
     /// <summary>Tabla de hallazgos confirmados: donde se encontro (ubicacion), esfuerzo, estrategia de

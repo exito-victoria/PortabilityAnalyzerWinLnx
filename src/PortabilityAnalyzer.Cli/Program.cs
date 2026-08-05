@@ -82,6 +82,10 @@ internal static class Program
             var total = analyzed.Select(r => r.Effort)
                                 .Aggregate(EffortEstimate.Zero, (acc, e) => acc.Add(e));
 
+            // Desglose del coste por bucket multiplataforma (incluye Pruebas y CI transversal).
+            var costByBucket = new CostBucketEstimator(options.ThirdPartyFactor, options.TestingFactor)
+                .Compute(results);
+
             var report = new AnalysisReport
             {
                 GeneratedAt = DateTimeOffset.Now,
@@ -89,7 +93,8 @@ internal static class Program
                 TotalEffort = total,
                 BlockerCount = results.Count(r => r.HasBlocker),
                 AnalyzedCount = analyzed.Count,
-                SkippedCount = results.Count - analyzed.Count
+                SkippedCount = results.Count - analyzed.Count,
+                CostByBucket = costByBucket
             };
 
             // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico

@@ -25,11 +25,15 @@ internal sealed class CliOptions
     /// <summary>Factor de incertidumbre para ensamblados de terceros (solo se aplica si <see cref="AssumeThirdParty"/>).</summary>
     public double ThirdPartyFactor { get; init; } = 1.5;
 
+    /// <summary>Fraccion del esfuerzo de desarrollo que se imputa al bucket de Pruebas y CI en ambos SO.</summary>
+    public double TestingFactor { get; init; } = 0.25;
+
     public static CliOptions? Parse(string[] args)
     {
         string? input = null, rules = null, schema = null, output = null, format = null;
         bool assumeThirdParty = false;
         double thirdPartyFactor = 1.5;
+        double testingFactor = 0.25;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -55,6 +59,14 @@ internal sealed class CliOptions
                     assumeThirdParty = true; // pasar un factor implica quererlo aplicar.
                     break;
 
+                case "--testing-factor":
+                    var rawT = Next(args, ref i);
+                    if (rawT is null ||
+                        !double.TryParse(rawT, NumberStyles.Float, CultureInfo.InvariantCulture, out testingFactor) ||
+                        testingFactor < 0)
+                        return null; // factor ausente o invalido: se muestra el uso.
+                    break;
+
                 // Se ignoran tokens desconocidos para no romper el parseo por desalineacion.
             }
         }
@@ -69,7 +81,8 @@ internal sealed class CliOptions
             OutputPath = output ?? "portability-report.json",
             Formats = ParseFormats(format),
             AssumeThirdParty = assumeThirdParty,
-            ThirdPartyFactor = thirdPartyFactor
+            ThirdPartyFactor = thirdPartyFactor,
+            TestingFactor = testingFactor
         };
     }
 
@@ -112,5 +125,6 @@ internal sealed class CliOptions
             "                            (p. ej. 'word,markdown' -> una ejecucion, dos informes; la extension" + Environment.NewLine +
             "                            de cada uno se deriva de --output cuando se piden varios)." + Environment.NewLine +
             "  --assume-third-party      Aplica un factor de incertidumbre (x1.5 por defecto) a todos los ensamblados." + Environment.NewLine +
-            "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party.");
+            "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party." + Environment.NewLine +
+            "  --testing-factor <n>      Fraccion del esfuerzo de desarrollo imputada a Pruebas y CI (por defecto 0.25).");
 }

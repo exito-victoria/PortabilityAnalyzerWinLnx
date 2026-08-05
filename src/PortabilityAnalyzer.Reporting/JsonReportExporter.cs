@@ -19,7 +19,9 @@ public sealed class JsonReportExporter : IReportExporter
             {
                 new JsonStringEnumConverter<Severity>(),
                 new JsonStringEnumConverter<Confidence>(),
-                new JsonStringEnumConverter<AssemblyKind>()
+                new JsonStringEnumConverter<AssemblyKind>(),
+                new JsonStringEnumConverter<SeparationStrategy>(),
+                new JsonStringEnumConverter<CostBucket>()
             }
         };
         File.WriteAllText(outputPath, JsonSerializer.Serialize(report, options));

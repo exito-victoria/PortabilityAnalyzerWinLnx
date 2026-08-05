@@ -37,8 +37,10 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para("Informe de portabilidad Windows -> Linux", bold: true, sizeHalfPt: 36));
         b.Append(Para($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}"));
         b.Append(Para($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}"));
-        b.Append(Para($"Esfuerzo total (horas) -> optimista: {report.TotalEffort.Optimista:0.#} | media: {report.TotalEffort.Media:0.#} | pesimista: {report.TotalEffort.Pesimista:0.#}"));
+        b.Append(Para($"Esfuerzo total de desarrollo (horas) -> optimista: {report.TotalEffort.Optimista:0.#} | media: {report.TotalEffort.Media:0.#} | pesimista: {report.TotalEffort.Pesimista:0.#}"));
         b.Append(Para(string.Empty));
+
+        AppendBucketSummary(b, report.CostByBucket);
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
         //                              Regla Sev  N   Esf  Ubic Estr Evid Alt  Pasos
@@ -116,6 +118,38 @@ public sealed class WordReportExporter : IReportExporter
             new PageMargin { Top = Margin, Bottom = Margin, Left = (uint)Margin, Right = (uint)Margin, Header = 360, Footer = 360, Gutter = 0 }));
 
         mainPart.Document.Save();
+    }
+
+    /// <summary>Resumen ejecutivo del coste por bucket multiplataforma (incluye Pruebas y CI).</summary>
+    private static void AppendBucketSummary(Body b, IReadOnlyList<BucketEffort> buckets)
+    {
+        if (buckets.Count == 0) return;
+        var grand = buckets.Aggregate(EffortEstimate.Zero, (a, x) => a.Add(x.Effort));
+
+        b.Append(Para("Coste por bucket (multiplataforma)", bold: true, sizeHalfPt: 28));
+
+        var rows = new List<string[]>();
+        foreach (var x in buckets)
+        {
+            var pct = grand.Media > 0 ? x.Effort.Media / grand.Media * 100 : 0;
+            rows.Add(new[]
+            {
+                CostBuckets.Text(x.Bucket), x.Effort.Optimista.ToString("0.#"),
+                x.Effort.Media.ToString("0.#"), x.Effort.Pesimista.ToString("0.#"), $"{pct:0} %"
+            });
+        }
+        rows.Add(new[]
+        {
+            "Total (con Pruebas y CI)", grand.Optimista.ToString("0.#"),
+            grand.Media.ToString("0.#"), grand.Pesimista.ToString("0.#"), "100 %"
+        });
+
+        b.Append(BuildTable(
+            new[] { "Bucket", "Optimista", "Media", "Pesimista", "%" },
+            new[] { 4.0, 1.2, 1.2, 1.2, 1.0 },
+            rows));
+        b.Append(Para("Modelo: esfuerzo una vez por regla y ensamblado (PERT); factor de terceros aplicado a sus ensamblados; Pruebas y CI como fraccion del esfuerzo de desarrollo."));
+        b.Append(Para(string.Empty));
     }
 
     private static Paragraph Para(string text, bool bold = false, int? sizeHalfPt = null)

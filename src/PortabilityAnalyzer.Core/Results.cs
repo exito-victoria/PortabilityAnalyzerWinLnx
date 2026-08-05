@@ -54,4 +54,7 @@ public sealed record AnalysisReport
     public int BlockerCount { get; init; }
     public int AnalyzedCount { get; init; }
     public int SkippedCount { get; init; }
+
+    /// <summary>Desglose del esfuerzo por bucket de coste multiplataforma (incluye Pruebas y CI).</summary>
+    public IReadOnlyList<BucketEffort> CostByBucket { get; init; } = new List<BucketEffort>();
 }
