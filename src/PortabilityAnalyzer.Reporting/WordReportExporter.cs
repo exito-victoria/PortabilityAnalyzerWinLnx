@@ -64,12 +64,12 @@ public sealed class WordReportExporter : IReportExporter
             }
 
             var terceros = asm.IsThirdParty ? " | Terceros (factor de incertidumbre aplicado)" : string.Empty;
-            b.Append(Para($"Severidad maxima: {asm.MaxSeverity} | Esfuerzo medio: {asm.Effort.Media:0.#} h{terceros}"));
+            b.Append(Para($"Severidad máxima: {asm.MaxSeverity} | Esfuerzo medio: {asm.Effort.Media:0.#} h{terceros}"));
 
             if (confirmed.Count > 0)
             {
                 b.Append(BuildTable(
-                    new[] { "Regla", "Severidad", "N", "Esfuerzo (h)", "Ubicacion (ejemplo)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediacion" },
+                    new[] { "Regla", "Severidad", "N", "Esfuerzo (h)", "Ubicación (ejemplo)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediación" },
                     confirmedWeights,
                     confirmed.Select(g =>
                     {
@@ -88,16 +88,16 @@ public sealed class WordReportExporter : IReportExporter
             }
             else
             {
-                b.Append(Para("Sin hallazgos confirmados (solo senales debiles, ver abajo)."));
+                b.Append(Para("Sin hallazgos confirmados (solo señales débiles, ver abajo)."));
             }
 
             if (manual.Count > 0)
             {
                 var ocurrencias = manual.Sum(g => g.Count);
-                b.Append(Para($"Revision manual — senal debil, excluida del esfuerzo ({manual.Count} grupos / {ocurrencias} ocurrencias)",
+                b.Append(Para($"Revisión manual - señal débil, excluida del esfuerzo ({manual.Count} grupos / {ocurrencias} ocurrencias)",
                     bold: true, sizeHalfPt: 24));
                 b.Append(BuildTable(
-                    new[] { "Regla", "Severidad", "Confianza", "N", "Evidencia", "Ubicacion (ejemplo)" },
+                    new[] { "Regla", "Severidad", "Confianza", "N", "Evidencia", "Ubicación (ejemplo)" },
                     manualWeights,
                     manual.Select(g =>
                     {
@@ -122,28 +122,28 @@ public sealed class WordReportExporter : IReportExporter
         mainPart.Document.Save();
     }
 
-    /// <summary>Recomendacion de arquitectura destino y plan de migracion (sintetizado del analisis).</summary>
+    /// <summary>Recomendacion de arquitectura destino y plan de migración (sintetizado del analisis).</summary>
     private static void AppendArchitectureSection(Body b, AnalysisReport report)
     {
         var plan = ArchitectureRecommendation.Build(report);
 
-        b.Append(Para("Arquitectura destino recomendada y plan de migracion", bold: true, sizeHalfPt: 28));
-        b.Append(Para($"Objetivo: core .NET 8 comun + WPF en Windows y Avalonia en Linux. Esfuerzo total estimado (con Pruebas y CI): {plan.TotalWithTesting.Media:0.#} h (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}."));
+        b.Append(Para("Arquitectura destino recomendada y plan de migración", bold: true, sizeHalfPt: 28));
+        b.Append(Para($"Objetivo: core .NET 8 común + WPF en Windows y Avalonia en Linux. Esfuerzo total estimado (con Pruebas y CI): {plan.TotalWithTesting.Media:0.#} h (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}."));
 
         b.Append(Para("Estructura de proyectos propuesta", bold: true, sizeHalfPt: 24));
         b.Append(BuildTable(
-            new[] { "Proyecto", "TFM", "Proposito" },
+            new[] { "Proyecto", "TFM", "Propósito" },
             new[] { 2.5, 1.5, 4.0 },
             plan.Projects.Select(p => new[] { p.Name, p.Tfm, p.Purpose })));
 
         if (plan.Abstractions.Count > 0)
         {
-            b.Append(Para("Capa de abstraccion (interfaces por plataforma)", bold: true, sizeHalfPt: 24));
+            b.Append(Para("Capa de abstracción (interfaces por plataforma)", bold: true, sizeHalfPt: 24));
             foreach (var a in plan.Abstractions)
                 b.Append(Para($"- {a}"));
         }
 
-        b.Append(Para("Plan de migracion", bold: true, sizeHalfPt: 24));
+        b.Append(Para("Plan de migración", bold: true, sizeHalfPt: 24));
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             b.Append(Para($"{i + 1}. {plan.MigrationSteps[i]}"));
         b.Append(Para(string.Empty));
@@ -155,8 +155,8 @@ public sealed class WordReportExporter : IReportExporter
         var profiles = ThirdPartyAnalysis.Analyze(report);
         if (profiles.Count == 0) return;
 
-        b.Append(Para("Analisis de terceros (sin fuentes)", bold: true, sizeHalfPt: 28));
-        b.Append(Para("Estos ensamblados son de terceros: no se dispone del codigo fuente ni control de su build. Verificar si el paquete tiene version multiplataforma; si no, reemplazarlo o encapsular su uso tras una interfaz."));
+        b.Append(Para("Análisis de terceros (sin fuentes)", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Estos ensamblados son de terceros: no se dispone del código fuente ni control de su build. Verificar si el paquete tiene versión multiplataforma; si no, reemplazarlo o encapsular su uso tras una interfaz."));
 
         foreach (var p in profiles)
         {
@@ -208,7 +208,7 @@ public sealed class WordReportExporter : IReportExporter
             new[] { "Bucket", "Optimista", "Media", "Pesimista", "%" },
             new[] { 4.0, 1.2, 1.2, 1.2, 1.0 },
             rows));
-        b.Append(Para("Modelo: esfuerzo una vez por regla y ensamblado (PERT); factor de terceros aplicado a sus ensamblados; Pruebas y CI como fraccion del esfuerzo de desarrollo."));
+        b.Append(Para("Modelo: esfuerzo una vez por regla y ensamblado (PERT); factor de terceros aplicado a sus ensamblados; Pruebas y CI como fracción del esfuerzo de desarrollo."));
         b.Append(Para(string.Empty));
     }
 

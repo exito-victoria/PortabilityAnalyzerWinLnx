@@ -34,8 +34,8 @@ public static class CostBuckets
     /// <summary>Nombre legible del bucket.</summary>
     public static string Text(CostBucket b) => b switch
     {
-        CostBucket.NucleoComun => "Adaptacion a nucleo comun",
-        CostBucket.SeparacionAbstraccion => "Separacion por plataforma (abstraccion)",
+        CostBucket.NucleoComun => "Adaptación a núcleo común",
+        CostBucket.SeparacionAbstraccion => "Separación por plataforma (abstracción)",
         CostBucket.ReemplazoDependencias => "Reemplazo de dependencias",
         CostBucket.UILinux => "UI Linux (Avalonia)",
         CostBucket.PruebasCI => "Pruebas y CI en ambos SO",

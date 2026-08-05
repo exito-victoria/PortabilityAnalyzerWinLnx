@@ -37,21 +37,21 @@ public sealed class MarkdownReportExporter : IReportExporter
             }
 
             var terceros = asm.IsThirdParty ? " | Terceros (factor de incertidumbre aplicado)" : string.Empty;
-            sb.AppendLine($"Severidad maxima: {asm.MaxSeverity} | Esfuerzo medio: {asm.Effort.Media:0.#} h{terceros}");
+            sb.AppendLine($"Severidad máxima: {asm.MaxSeverity} | Esfuerzo medio: {asm.Effort.Media:0.#} h{terceros}");
             sb.AppendLine();
 
             if (confirmed.Count > 0)
                 AppendConfirmedTable(sb, confirmed);
             else
             {
-                sb.AppendLine("Sin hallazgos confirmados (solo senales debiles, ver abajo).");
+                sb.AppendLine("Sin hallazgos confirmados (solo señales débiles, ver abajo).");
                 sb.AppendLine();
             }
 
             if (manual.Count > 0)
             {
                 var ocurrencias = manual.Sum(g => g.Count);
-                sb.AppendLine($"### Revision manual — senal debil, excluida del esfuerzo ({manual.Count} grupos / {ocurrencias} ocurrencias)");
+                sb.AppendLine($"### Revisión manual - señal débil, excluida del esfuerzo ({manual.Count} grupos / {ocurrencias} ocurrencias)");
                 sb.AppendLine();
                 AppendManualTable(sb, manual);
             }
@@ -60,19 +60,19 @@ public sealed class MarkdownReportExporter : IReportExporter
         File.WriteAllText(outputPath, sb.ToString());
     }
 
-    /// <summary>Recomendacion de arquitectura destino y plan de migracion (sintetizado del analisis).</summary>
+    /// <summary>Recomendacion de arquitectura destino y plan de migración (sintetizado del analisis).</summary>
     private static void AppendArchitectureSection(StringBuilder sb, AnalysisReport report)
     {
         var plan = ArchitectureRecommendation.Build(report);
 
-        sb.AppendLine("## Arquitectura destino recomendada y plan de migracion");
+        sb.AppendLine("## Arquitectura destino recomendada y plan de migración");
         sb.AppendLine();
-        sb.AppendLine($"Objetivo: **core .NET 8 comun** + **WPF en Windows** y **Avalonia en Linux**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
+        sb.AppendLine($"Objetivo: **core .NET 8 común** + **WPF en Windows** y **Avalonia en Linux**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
         sb.AppendLine();
 
         sb.AppendLine("### Estructura de proyectos propuesta");
         sb.AppendLine();
-        sb.AppendLine("| Proyecto | TFM | Proposito |");
+        sb.AppendLine("| Proyecto | TFM | Propósito |");
         sb.AppendLine("|----------|-----|-----------|");
         foreach (var p in plan.Projects)
             sb.AppendLine($"| {Cell(p.Name)} | {p.Tfm} | {Cell(p.Purpose)} |");
@@ -80,14 +80,14 @@ public sealed class MarkdownReportExporter : IReportExporter
 
         if (plan.Abstractions.Count > 0)
         {
-            sb.AppendLine("### Capa de abstraccion (interfaces por plataforma)");
+            sb.AppendLine("### Capa de abstracción (interfaces por plataforma)");
             sb.AppendLine();
             foreach (var a in plan.Abstractions)
                 sb.AppendLine($"- {a}");
             sb.AppendLine();
         }
 
-        sb.AppendLine("### Plan de migracion");
+        sb.AppendLine("### Plan de migración");
         sb.AppendLine();
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             sb.AppendLine($"{i + 1}. {plan.MigrationSteps[i]}");
@@ -101,9 +101,9 @@ public sealed class MarkdownReportExporter : IReportExporter
         var profiles = ThirdPartyAnalysis.Analyze(report);
         if (profiles.Count == 0) return;
 
-        sb.AppendLine("## Analisis de terceros (sin fuentes)");
+        sb.AppendLine("## Análisis de terceros (sin fuentes)");
         sb.AppendLine();
-        sb.AppendLine("> Estos ensamblados son de terceros: no se dispone del codigo fuente ni control de su build. Verificar si el paquete tiene version multiplataforma; si no, reemplazarlo o encapsular su uso tras una interfaz.");
+        sb.AppendLine("> Estos ensamblados son de terceros: no se dispone del código fuente ni control de su build. Verificar si el paquete tiene versión multiplataforma; si no, reemplazarlo o encapsular su uso tras una interfaz.");
         sb.AppendLine();
 
         foreach (var p in profiles)
@@ -146,7 +146,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         }
         sb.AppendLine($"| **Total (con Pruebas y CI)** | {grand.Optimista:0.#} | {grand.Media:0.#} | {grand.Pesimista:0.#} | 100 % |");
         sb.AppendLine();
-        sb.AppendLine("> Modelo: esfuerzo contado una vez por regla y ensamblado (PERT O/M/P), con factor de incertidumbre a los ensamblados de terceros. Los buckets de desarrollo se derivan de la estrategia de separacion de cada regla; Pruebas y CI es una fraccion transversal del esfuerzo de desarrollo.");
+        sb.AppendLine("> Modelo: esfuerzo contado una vez por regla y ensamblado (PERT O/M/P), con factor de incertidumbre a los ensamblados de terceros. Los buckets de desarrollo se derivan de la estrategia de separación de cada regla; Pruebas y CI es una fracción transversal del esfuerzo de desarrollo.");
         sb.AppendLine();
     }
 
@@ -155,7 +155,7 @@ public sealed class MarkdownReportExporter : IReportExporter
     /// redundante con Severidad (un bloqueante tiene severidad Bloqueante).</summary>
     private static void AppendConfirmedTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | N | Esfuerzo (h) | Ubicacion (ejemplo) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediacion |");
+        sb.AppendLine("| Regla | Severidad | N | Esfuerzo (h) | Ubicación (ejemplo) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediación |");
         sb.AppendLine("|-------|-----------|---|--------------|---------------------|------------|-----------|------------------------------------------|----------------------|");
         foreach (var g in groups)
         {
@@ -171,7 +171,7 @@ public sealed class MarkdownReportExporter : IReportExporter
     /// <summary>Tabla de senal debil (confianza Baja): no cuenta esfuerzo; muestra una ubicacion de ejemplo.</summary>
     private static void AppendManualTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | Confianza | N | Evidencia | Ubicacion (ejemplo) |");
+        sb.AppendLine("| Regla | Severidad | Confianza | N | Evidencia | Ubicación (ejemplo) |");
         sb.AppendLine("|-------|-----------|-----------|---|-----------|---------------------|");
         foreach (var g in groups)
         {

@@ -2,10 +2,10 @@
   "schemaVersion": "1.0",
   "metadata": {
     "nombre": "Catalogo semilla de reglas de portabilidad Windows -> Linux (.NET 8)",
-    "descripcion": "Reglas data-driven para el analisis estatico IL (Mono.Cecil) de la solucion WPF/Oracle. Cada regla identifica una dependencia potencial del sistema operativo Windows y su ruta de portabilidad a Linux.",
-    "generadoPara": "Herramienta de consola C# / .NET 8 descrita en el prompt de analisis de portabilidad",
-    "advertencia": "Los esfuerzos son SEMILLA orientativa (heuristica) y deben calibrarse con datos reales del equipo. La disponibilidad exacta de cada API en Linux depende de la version de .NET y de los paquetes NuGet en uso: verificar contra la version objetivo.",
-    "notasDeUso": "matchMode: 'equals' (exacto), 'startsWith' (prefijo, util para namespaces/assemblies), 'contains', 'regex'. patron.tipo indica como aplica el detector: pInvokeDll | assemblyReference | namespace | type | method | attribute | apiCall | stringLiteral."
+    "descripcion": "Reglas data-driven para el anÃ¡lisis estatico IL (Mono.Cecil) de la solucion WPF/Oracle. Cada regla identifica una dependencia potencial del sistema operativo Windows y su ruta de portabilidad a Linux.",
+    "generadoPara": "Herramienta de consola C# / .NET 8 descrita en el prompt de anÃ¡lisis de portabilidad",
+    "advertencia": "Los esfuerzos son SEMILLA orientativa (heuristica) y deben calibrarse con datos reales del equipo. La disponibilidad exacta de cada API en Linux depende de la versiÃ³n de .NET y de los paquetes NuGet en uso: verificar contra la versiÃ³n objetivo.",
+    "notasDeUso": "matchMode: 'equals' (exacto), 'startsWith' (prefijo, Ãºtil para namespaces/assemblies), 'contains', 'regex'. patron.tipo indica como aplica el detector: pInvokeDll | assemblyReference | namespace | type | method | attribute | apiCall | stringLiteral."
   },
   "modeloEsfuerzo": {
     "unidad": "horas-persona",
@@ -16,7 +16,7 @@
     "notaIncertidumbre": "Aplicar el factor de incertidumbre a ensamblados de terceros, ofuscados o marcados como 'no analizable', y declararlo en el informe.",
     "leyendaConfianza": {
       "Alta": "Deteccion deterministica (atributo, DllImport, referencia de ensamblado explicita).",
-      "Media": "Deteccion por patron de API o namespace; posibles falsos positivos segun uso real.",
+      "Media": "Deteccion por patron de API o namespace; posibles falsos positivos segÃºn uso real.",
       "Baja": "Heuristica textual (literales de cadena, rutas); revision manual recomendada."
     }
   },
@@ -29,28 +29,28 @@
     "Registry": "Acceso al Registro de Windows.",
     "Cryptography": "APIs criptograficas ligadas a CryptoAPI/CNG/DPAPI/almacen de certificados de Windows.",
     "Identity": "Autenticacion e identidad de Windows (SSPI/AD).",
-    "Threading": "Modelos de hilos/sincronizacion con semantica dependiente de Windows.",
+    "Threading": "Modelos de hilos/sincronizaciÃ³n con semÃ¡ntica dependiente de Windows.",
     "ProcessInvocation": "Invocacion de comandos o ejecutables del sistema operativo.",
     "FileSystem": "Supuestos del sistema de ficheros de Windows (unidades, separadores, carpetas especiales).",
     "Database": "Controladores de base de datos dependientes de la plataforma.",
-    "Misc": "Otras dependencias menores o de senal debil."
+    "Misc": "Otras dependencias menores o de seÃ±al debil."
   },
   "reglas": [
     {
       "id": "PINVOKE-KERNEL32",
       "categoria": "PInvoke",
-      "descripcion": "DllImport a kernel32.dll (gestion de procesos, memoria, ficheros, handles nativos).",
+      "descripcion": "DllImport a kernel32.dll (gestiÃ³n de procesos, memoria, ficheros, handles nativos).",
       "patron": { "tipo": "pInvokeDll", "valor": "kernel32", "matchMode": "startsWith" },
       "severidad": "Alto",
       "esBloqueante": false,
-      "alternativaLinux": "Sustituir por APIs gestionadas equivalentes (System.IO, System.Diagnostics, System.Runtime.InteropServices en su version multiplataforma) o P/Invoke condicional por SO.",
+      "alternativaLinux": "Sustituir por APIs gestionadas equivalentes (System.IO, System.Diagnostics, System.Runtime.InteropServices en su versiÃ³n multiplataforma) o P/Invoke condicional por SO.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Identificar la funcionalidad concreta de cada P/Invoke a kernel32 (procesos, memoria, ficheros, handles).",
         "Sustituir por la API gestionada equivalente cuando exista (System.IO, System.Diagnostics, System.Runtime.InteropServices).",
-        "Para lo que no tenga equivalente gestionado, aislar la llamada tras una interfaz (p. ej. INativePlatform) con implementacion por SO.",
+        "Para lo que no tenga equivalente gestionado, aislar la llamada tras una interfaz (p. ej. INativePlatform) con implementaciÃ³n por SO.",
         "Guardar las rutas Windows-only con OperatingSystem.IsWindows() y proveer la ruta Linux o un no-op.",
         "Anadir pruebas que se ejecuten en Windows y Linux (CI en ambos)."
       ]
@@ -62,7 +62,7 @@
       "patron": { "tipo": "pInvokeDll", "valor": "user32", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "No portable directamente: funcionalidad de UI Win32. Requiere rediseno de la capa de presentacion o eliminacion de la dependencia en la libreria de negocio.",
+      "alternativaLinux": "No portable directamente: funcionalidad de UI Win32. Requiere rediseÃ±o de la capa de presentacion o eliminacion de la dependencia en la librerÃ­a de negocio.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 60 },
       "confianza": "Alta",
       "estrategiaSeparacion": "RedisenoUI",
@@ -80,33 +80,33 @@
       "patron": { "tipo": "pInvokeDll", "valor": "gdi32", "matchMode": "startsWith" },
       "severidad": "Alto",
       "esBloqueante": false,
-      "alternativaLinux": "Sustituir grafico por SkiaSharp o ImageSharp (multiplataforma).",
+      "alternativaLinux": "Sustituir grÃ¡fico por SkiaSharp o ImageSharp (multiplataforma).",
       "esfuerzo": { "optimista": 3, "masProbable": 12, "pesimista": 40 },
       "confianza": "Alta",
       "estrategiaSeparacion": "ReemplazarDependencia",
       "pasosRemediacion": [
-        "Localizar el dibujo/graficos que usan gdi32.",
+        "Localizar el dibujo/grÃ¡ficos que usan gdi32.",
         "Sustituir por SkiaSharp o ImageSharp (multiplataforma).",
-        "Aislar el codigo de dibujo tras una abstraccion si comparte logica.",
+        "Aislar el cÃ³digo de dibujo tras una abstracciÃ³n si comparte logica.",
         "Probar el render en Windows y Linux."
       ]
     },
     {
       "id": "PINVOKE-ADVAPI32",
       "categoria": "PInvoke",
-      "descripcion": "DllImport a advapi32.dll (registro, servicios, seguridad, criptografia CAPI).",
+      "descripcion": "DllImport a advapi32.dll (registro, servicios, seguridad, criptografÃ­a CAPI).",
       "patron": { "tipo": "pInvokeDll", "valor": "advapi32", "matchMode": "startsWith" },
       "severidad": "Alto",
       "esBloqueante": false,
-      "alternativaLinux": "Reemplazar por equivalentes gestionados (configuracion externa en vez de registro, System.Security.Cryptography portable, etc.).",
+      "alternativaLinux": "Reemplazar por equivalentes gestionados (configuraciÃ³n externa en vez de registro, System.Security.Cryptography portable, etc.).",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Clasificar cada uso de advapi32: registro, servicios, seguridad o criptografia CAPI.",
+        "Clasificar cada uso de advapi32: registro, servicios, seguridad o criptografÃ­a CAPI.",
         "Registro -> externalizar a appsettings.json / IConfiguration o variables de entorno.",
         "Criptografia CAPI -> usar System.Security.Cryptography multiplataforma (RSA.Create, Aes.Create).",
-        "Lo que no tenga equivalente gestionado, abstraer tras una interfaz con implementacion solo-Windows.",
+        "Lo que no tenga equivalente gestionado, abstraer tras una interfaz con implementaciÃ³n solo-Windows.",
         "Probar el comportamiento en Windows y Linux."
       ]
     },
@@ -124,23 +124,23 @@
       "pasosRemediacion": [
         "Identificar el servicio COM que se obtiene via ole32.",
         "Abstraer ese servicio tras una interfaz multiplataforma.",
-        "Proveer implementacion Windows (COM) y alternativa Linux, o eliminar la dependencia.",
+        "Proveer implementaciÃ³n Windows (COM) y alternativa Linux, o eliminar la dependencia.",
         "Probar en ambos SO."
       ]
     },
     {
       "id": "PINVOKE-OLEAUT32",
       "categoria": "PInvoke",
-      "descripcion": "DllImport a oleaut32.dll (automatizacion OLE, VARIANT, BSTR).",
+      "descripcion": "DllImport a oleaut32.dll (automatizaciÃ³n OLE, VARIANT, BSTR).",
       "patron": { "tipo": "pInvokeDll", "valor": "oleaut32", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Automatizacion OLE no disponible en Linux: rediseno necesario.",
+      "alternativaLinux": "Automatizacion OLE no disponible en Linux: rediseÃ±o necesario.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Localizar el uso de automatizacion OLE (VARIANT/BSTR).",
+        "Localizar el uso de automatizaciÃ³n OLE (VARIANT/BSTR).",
         "Redisenar sin OLE: usar tipos y serializacion gestionados.",
         "Aislar lo que dependa de Windows tras una interfaz.",
         "Probar en ambos SO."
@@ -153,14 +153,14 @@
       "patron": { "tipo": "pInvokeDll", "valor": "shell32", "matchMode": "startsWith" },
       "severidad": "Medio",
       "esBloqueante": false,
-      "alternativaLinux": "Sustituir por Environment.GetFolderPath / APIs gestionadas o logica especifica por SO.",
+      "alternativaLinux": "Sustituir por Environment.GetFolderPath / APIs gestionadas o logica especÃ­fica por SO.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Identificar el uso concreto de shell32 (rutas especiales, iconos).",
         "Sustituir por Environment.GetFolderPath o APIs gestionadas.",
-        "Lo especifico del shell, aislar por SO.",
+        "Lo especÃ­fico del shell, aislar por SO.",
         "Probar en ambos SO."
       ]
     },
@@ -207,13 +207,13 @@
       "patron": { "tipo": "pInvokeDll", "valor": "winmm", "matchMode": "startsWith" },
       "severidad": "Medio",
       "esBloqueante": false,
-      "alternativaLinux": "Sustituir por libreria multimedia multiplataforma o temporizadores gestionados (System.Threading / PeriodicTimer).",
+      "alternativaLinux": "Sustituir por librerÃ­a multimedia multiplataforma o temporizadores gestionados (System.Threading / PeriodicTimer).",
       "esfuerzo": { "optimista": 1, "masProbable": 6, "pesimista": 20 },
       "confianza": "Alta",
       "estrategiaSeparacion": "ReemplazarDependencia",
       "pasosRemediacion": [
         "Identificar el uso (sonido, temporizadores multimedia).",
-        "Sustituir por una libreria multimedia multiplataforma o por temporizadores gestionados (PeriodicTimer).",
+        "Sustituir por una librerÃ­a multimedia multiplataforma o por temporizadores gestionados (PeriodicTimer).",
         "Probar en Windows y Linux."
       ]
     },
@@ -242,7 +242,7 @@
       "patron": { "tipo": "pInvokeDll", "valor": "setupapi", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Enumeracion de dispositivos especifica de Windows: en Linux usar sysfs/udev; rediseno necesario.",
+      "alternativaLinux": "Enumeracion de dispositivos especÃ­fica de Windows: en Linux usar sysfs/udev; rediseÃ±o necesario.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
@@ -256,7 +256,7 @@
     {
       "id": "PINVOKE-NETAPI32",
       "categoria": "PInvoke",
-      "descripcion": "DllImport a netapi32.dll (gestion de red/dominio de Windows).",
+      "descripcion": "DllImport a netapi32.dll (gestiÃ³n de red/dominio de Windows).",
       "patron": { "tipo": "pInvokeDll", "valor": "netapi32", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
@@ -274,19 +274,19 @@
     {
       "id": "PINVOKE-SECUR32",
       "categoria": "PInvoke",
-      "descripcion": "DllImport a secur32.dll (SSPI, autenticacion integrada de Windows).",
+      "descripcion": "DllImport a secur32.dll (SSPI, autenticaciÃ³n integrada de Windows).",
       "patron": { "tipo": "pInvokeDll", "valor": "secur32", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "SSPI no existe en Linux; usar GSSAPI/Kerberos o esquema de autenticacion alternativo.",
+      "alternativaLinux": "SSPI no existe en Linux; usar GSSAPI/Kerberos o esquema de autenticaciÃ³n alternativo.",
       "esfuerzo": { "optimista": 6, "masProbable": 20, "pesimista": 60 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Localizar el uso de SSPI/autenticacion integrada.",
-        "Abstraer la autenticacion tras una interfaz.",
+        "Localizar el uso de SSPI/autenticaciÃ³n integrada.",
+        "Abstraer la autenticaciÃ³n tras una interfaz.",
         "En Windows usar SSPI; en Linux GSSAPI/Kerberos.",
-        "Probar autenticacion en ambos SO."
+        "Probar autenticaciÃ³n en ambos SO."
       ]
     },
     {
@@ -303,7 +303,7 @@
       "pasosRemediacion": [
         "Identificar el uso de sesiones de Terminal Services.",
         "Revisar si el concepto aplica en Linux; si no, eliminar la funcionalidad.",
-        "Si aplica, aislar tras una interfaz con implementacion por SO.",
+        "Si aplica, aislar tras una interfaz con implementaciÃ³n por SO.",
         "Probar en ambos SO."
       ]
     },
@@ -350,15 +350,15 @@
       "patron": { "tipo": "pInvokeDll", "valor": "\\.dll$", "matchMode": "regex" },
       "severidad": "Medio",
       "esBloqueante": false,
-      "alternativaLinux": "Verificar si existe la .so equivalente en Linux o si la funcionalidad tiene alternativa gestionada. Comprobar tambien P/Invoke a librerias de terceros embebidas.",
+      "alternativaLinux": "Verificar si existe la .so equivalente en Linux o si la funcionalidad tiene alternativa gestionada. Comprobar tambiÃ©n P/Invoke a librerÃ­as de terceros embebidas.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 30 },
       "confianza": "Baja",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "REVISION MANUAL: identificar el origen de la DLL nativa.",
+        "REVISIÃ“N MANUAL: identificar el origen de la DLL nativa.",
         "Comprobar si existe la .so equivalente en Linux o una alternativa gestionada.",
-        "Si es de un tercero, analizar sus dependencias del SO (analisis de terceros).",
-        "Aislar la llamada tras una interfaz con implementacion por SO.",
+        "Si es de un tercero, analizar sus dependencias del SO (anÃ¡lisis de terceros).",
+        "Aislar la llamada tras una interfaz con implementaciÃ³n por SO.",
         "Probar en ambos SO."
       ]
     },
@@ -370,7 +370,7 @@
       "patron": { "tipo": "attribute", "valor": "System.Runtime.InteropServices.ComImportAttribute", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "COM no esta disponible en Linux. Abstraer detras de una interfaz y proveer una implementacion multiplataforma, o eliminar la funcionalidad.",
+      "alternativaLinux": "COM no esta disponible en Linux. Abstraer detras de una interfaz y proveer una implementaciÃ³n multiplataforma, o eliminar la funcionalidad.",
       "esfuerzo": { "optimista": 4, "masProbable": 20, "pesimista": 80 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
@@ -388,30 +388,30 @@
       "patron": { "tipo": "attribute", "valor": "System.Runtime.InteropServices.CoClassAttribute", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "COM no disponible en Linux: rediseno necesario.",
+      "alternativaLinux": "COM no disponible en Linux: rediseÃ±o necesario.",
       "esfuerzo": { "optimista": 4, "masProbable": 20, "pesimista": 80 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Localizar la instanciacion de la coclass COM.",
-        "Sustituir por una fabrica/abstraccion multiplataforma.",
-        "Proveer implementacion Windows (COM) y Linux, o eliminar.",
+        "Sustituir por una fabrica/abstracciÃ³n multiplataforma.",
+        "Proveer implementaciÃ³n Windows (COM) y Linux, o eliminar.",
         "Probar en ambos SO."
       ]
     },
     {
       "id": "COM-MARSHAL-ACTIVEOBJECT",
       "categoria": "COM",
-      "descripcion": "Llamadas a Marshal.GetActiveObject / Marshal.BindToMoniker (obtencion de objetos COM en ejecucion).",
+      "descripcion": "Llamadas a Marshal.GetActiveObject / Marshal.BindToMoniker (obtencion de objetos COM en ejecuciÃ³n).",
       "patron": { "tipo": "apiCall", "valor": "System.Runtime.InteropServices.Marshal::GetActiveObject", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "No disponible en Linux: eliminar dependencia de objetos COM en ejecucion.",
+      "alternativaLinux": "No disponible en Linux: eliminar dependencia de objetos COM en ejecuciÃ³n.",
       "esfuerzo": { "optimista": 3, "masProbable": 12, "pesimista": 40 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Localizar la obtencion de objetos COM en ejecucion.",
+        "Localizar la obtencion de objetos COM en ejecuciÃ³n.",
         "Redisenar para no depender de objetos COM activos.",
         "Si es imprescindible en Windows, aislar tras una interfaz.",
         "Probar en ambos SO."
@@ -420,20 +420,20 @@
     {
       "id": "COM-OFFICE-INTEROP",
       "categoria": "COM",
-      "descripcion": "Referencias a Microsoft.Office.Interop.* (automatizacion de Office via COM).",
+      "descripcion": "Referencias a Microsoft.Office.Interop.* (automatizaciÃ³n de Office via COM).",
       "patron": { "tipo": "namespace", "valor": "Microsoft.Office.Interop", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Automatizacion de Office no disponible en Linux. Usar librerias multiplataforma (por ejemplo generacion directa OpenXML, ClosedXML para xlsx) o un servicio externo.",
+      "alternativaLinux": "Automatizacion de Office no disponible en Linux. Usar librerÃ­as multiplataforma (por ejemplo generaciÃ³n directa OpenXML, ClosedXML para xlsx) o un servicio externo.",
       "esfuerzo": { "optimista": 8, "masProbable": 30, "pesimista": 100 },
       "confianza": "Alta",
       "estrategiaSeparacion": "ReemplazarDependencia",
-      "notaComun": "La generacion documental sin Office (OpenXML/ClosedXML) es comun a ambos SO.",
+      "notaComun": "La generaciÃ³n documental sin Office (OpenXML/ClosedXML) es comun a ambos SO.",
       "pasosRemediacion": [
-        "Identificar que produce la automatizacion de Office (Word/Excel).",
-        "Sustituir por generacion directa: OpenXML SDK, ClosedXML (xlsx) o similar.",
+        "Identificar que produce la automatizaciÃ³n de Office (Word/Excel).",
+        "Sustituir por generaciÃ³n directa: OpenXML SDK, ClosedXML (xlsx) o similar.",
         "Eliminar la dependencia de Microsoft.Office.Interop.",
-        "Probar la generacion en Windows y Linux."
+        "Probar la generaciÃ³n en Windows y Linux."
       ]
     },
 
@@ -444,7 +444,7 @@
       "patron": { "tipo": "assemblyReference", "valor": "PresentationFramework", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "WPF no se ejecuta en Linux. La libreria de negocio no debe referenciarlo: desacoplar la UI. Para UI multiplataforma evaluar Avalonia UI.",
+      "alternativaLinux": "WPF no se ejecuta en Linux. La librerÃ­a de negocio no debe referenciarlo: desacoplar la UI. Para UI multiplataforma evaluar Avalonia UI.",
       "esfuerzo": { "optimista": 8, "masProbable": 24, "pesimista": 80 },
       "confianza": "Alta",
       "estrategiaSeparacion": "RedisenoUI",
@@ -462,7 +462,7 @@
       "patron": { "tipo": "assemblyReference", "valor": "PresentationCore", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "WPF no portable a Linux. Desacoplar de la libreria de negocio.",
+      "alternativaLinux": "WPF no portable a Linux. Desacoplar de la librerÃ­a de negocio.",
       "esfuerzo": { "optimista": 8, "masProbable": 24, "pesimista": 80 },
       "confianza": "Alta",
       "estrategiaSeparacion": "RedisenoUI",
@@ -499,16 +499,16 @@
       "patron": { "tipo": "assemblyReference", "valor": "System.Windows.Forms", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "WinForms no portable a Linux. Desacoplar de la libreria de negocio.",
+      "alternativaLinux": "WinForms no portable a Linux. Desacoplar de la librerÃ­a de negocio.",
       "esfuerzo": { "optimista": 8, "masProbable": 24, "pesimista": 80 },
       "confianza": "Alta",
       "estrategiaSeparacion": "RedisenoUI",
       "pasosRemediacion": [
-        "Separar la logica de negocio del codigo WinForms hacia el core comun (net8.0).",
+        "Separar la logica de negocio del cÃ³digo WinForms hacia el core comun (net8.0).",
         "Mantener la UI WinForms/WPF solo en el ejecutable de Windows.",
         "Implementar la UI de Linux con Avalonia (MVVM), reutilizando ViewModels y logica del core.",
         "Sustituir las dependencias directas de controles WinForms por abstracciones de presentacion.",
-        "Validar la aplicacion en Windows (UI actual) y en Linux (Avalonia)."
+        "Validar la aplicaciÃ³n en Windows (UI actual) y en Linux (Avalonia)."
       ]
     },
     {
@@ -523,7 +523,7 @@
       "confianza": "Alta",
       "estrategiaSeparacion": "ReemplazarDependencia",
       "pasosRemediacion": [
-        "Localizar el uso de System.Drawing (imagenes, graficos).",
+        "Localizar el uso de System.Drawing (imagenes, grÃ¡ficos).",
         "Migrar a ImageSharp o SkiaSharp (multiplataforma).",
         "Eliminar la referencia a System.Drawing.Common.",
         "Probar el procesamiento de imagenes en ambos SO."
@@ -536,13 +536,13 @@
       "patron": { "tipo": "assemblyReference", "valor": "Microsoft.Win32.Registry", "matchMode": "equals" },
       "severidad": "Alto",
       "esBloqueante": false,
-      "alternativaLinux": "El registro no existe en Linux. Externalizar la configuracion a appsettings.json / variables de entorno / almacen de secretos.",
+      "alternativaLinux": "El registro no existe en Linux. Externalizar la configuraciÃ³n a appsettings.json / variables de entorno / almacen de secretos.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Inventariar el acceso al Registro.",
-        "Externalizar la configuracion a appsettings.json / variables de entorno via IConfiguration.",
+        "Externalizar la configuraciÃ³n a appsettings.json / variables de entorno via IConfiguration.",
         "Lo que deba seguir en Registro en Windows, aislar tras ISettingsStore.",
         "Probar en ambos SO."
       ]
@@ -554,14 +554,14 @@
       "patron": { "tipo": "assemblyReference", "valor": "System.Management", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "WMI es exclusivo de Windows. En Linux obtener la informacion equivalente via /proc, /sys o librerias del sistema.",
+      "alternativaLinux": "WMI es exclusivo de Windows. En Linux obtener la informaciÃ³n equivalente via /proc, /sys o librerÃ­as del sistema.",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Identificar que informacion se obtiene por WMI.",
+        "Identificar que informaciÃ³n se obtiene por WMI.",
         "Abstraer tras una interfaz de consulta del sistema.",
-        "En Linux implementar via /proc, /sys o librerias del sistema.",
+        "En Linux implementar via /proc, /sys o librerÃ­as del sistema.",
         "Probar en ambos SO."
       ]
     },
@@ -579,7 +579,7 @@
       "pasosRemediacion": [
         "Localizar las consultas a Active Directory.",
         "Migrar a LDAP multiplataforma (System.DirectoryServices.Protocols o Novell.Directory.Ldap).",
-        "Revisar autenticacion y filtros LDAP.",
+        "Revisar autenticaciÃ³n y filtros LDAP.",
         "Probar contra el directorio en ambos SO."
       ]
     },
@@ -597,7 +597,7 @@
       "pasosRemediacion": [
         "Identificar la interaccion con servicios de Windows.",
         "Para hosting, usar Microsoft.Extensions.Hosting; en Linux integrar con systemd.",
-        "Sustituir la gestion de servicios por el mecanismo del SO destino.",
+        "Sustituir la gestiÃ³n de servicios por el mecanismo del SO destino.",
         "Probar el arranque como servicio/daemon en ambos SO."
       ]
     },
@@ -634,7 +634,7 @@
       "pasosRemediacion": [
         "Localizar los contadores de rendimiento usados.",
         "Migrar a EventCounters / System.Diagnostics.Metrics (multiplataforma).",
-        "Adaptar la recogida/exportacion de metricas.",
+        "Adaptar la recogida/exportacion de mÃ©tricas.",
         "Probar en ambos SO."
       ]
     },
@@ -677,16 +677,16 @@
     {
       "id": "ASM-WINDOWS-SYSTEMEVENTS",
       "categoria": "AssemblyReference",
-      "descripcion": "Uso de Microsoft.Win32.SystemEvents (eventos del sistema Windows: sesion, energia, tema).",
+      "descripcion": "Uso de Microsoft.Win32.SystemEvents (eventos del sistema Windows: sesiÃ³n, energÃ­a, tema).",
       "patron": { "tipo": "type", "valor": "Microsoft.Win32.SystemEvents", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Eventos del sistema de Windows no disponibles. Suprimir o sustituir por mecanismos especificos de Linux si aplica.",
+      "alternativaLinux": "Eventos del sistema de Windows no disponibles. Suprimir o sustituir por mecanismos especÃ­ficos de Linux si aplica.",
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 16 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Identificar a que eventos del sistema se suscribe (sesion, energia, tema).",
+        "Identificar a que eventos del sistema se suscribe (sesiÃ³n, energÃ­a, tema).",
         "Abstraer tras una interfaz de eventos del sistema.",
         "En Linux implementar con los mecanismos disponibles o dejar no-op.",
         "Probar en ambos SO."
@@ -756,16 +756,16 @@
       "patron": { "tipo": "type", "valor": "Microsoft.Win32.Registry", "matchMode": "startsWith" },
       "severidad": "Alto",
       "esBloqueante": false,
-      "alternativaLinux": "Externalizar la configuracion (appsettings.json, variables de entorno, almacen de secretos). Revisar impacto en trazabilidad si el registro guardaba estado auditable.",
+      "alternativaLinux": "Externalizar la configuraciÃ³n (appsettings.json, variables de entorno, almacen de secretos). Revisar impacto en trazabilidad si el registro guardaba estado auditable.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Inventariar las claves y valores del Registro que se leen o escriben.",
-        "Mover esa configuracion a appsettings.json / variables de entorno / almacen de secretos, accedida via IConfiguration.",
-        "Si algun valor debe seguir en el Registro en Windows, aislar el acceso tras una interfaz ISettingsStore con implementacion de Registro en Windows y de fichero en Linux.",
+        "Mover esa configuraciÃ³n a appsettings.json / variables de entorno / almacen de secretos, accedida via IConfiguration.",
+        "Si algÃºn valor debe seguir en el Registro en Windows, aislar el acceso tras una interfaz ISettingsStore con implementaciÃ³n de Registro en Windows y de fichero en Linux.",
         "Revisar el impacto en trazabilidad/auditoria si el Registro guardaba estado auditable.",
-        "Probar lectura y escritura de configuracion en ambos SO."
+        "Probar lectura y escritura de configuraciÃ³n en ambos SO."
       ]
     },
 
@@ -798,10 +798,10 @@
       "esfuerzo": { "optimista": 2, "masProbable": 6, "pesimista": 16 },
       "confianza": "Media",
       "estrategiaSeparacion": "Comun",
-      "notaComun": "Usar las factorias multiplataforma (RSA.Create, ECDsa.Create) hace el codigo comun a ambos SO.",
+      "notaComun": "Usar las factorias multiplataforma (RSA.Create, ECDsa.Create) hace el cÃ³digo comun a ambos SO.",
       "pasosRemediacion": [
         "Sustituir las variantes *Cng (RSACng, ECDsaCng) por RSA.Create()/ECDsa.Create().",
-        "Verificar parametros y formatos de clave.",
+        "Verificar parÃ¡metros y formatos de clave.",
         "Probar en ambos SO."
       ]
     },
@@ -812,11 +812,11 @@
       "patron": { "tipo": "type", "valor": "System.Security.Cryptography.RSACryptoServiceProvider", "matchMode": "startsWith" },
       "severidad": "Medio",
       "esBloqueante": false,
-      "alternativaLinux": "Funciona parcialmente pero se recomienda migrar a RSA.Create()/Aes.Create() (implementacion multiplataforma).",
+      "alternativaLinux": "Funciona parcialmente pero se recomienda migrar a RSA.Create()/Aes.Create() (implementaciÃ³n multiplataforma).",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
       "confianza": "Media",
       "estrategiaSeparacion": "Comun",
-      "notaComun": "RSA.Create()/Aes.Create() son la implementacion multiplataforma.",
+      "notaComun": "RSA.Create()/Aes.Create() son la implementaciÃ³n multiplataforma.",
       "pasosRemediacion": [
         "Sustituir *CryptoServiceProvider por las factorias RSA.Create()/Aes.Create().",
         "Revisar el uso de claves y algoritmos.",
@@ -837,7 +837,7 @@
       "pasosRemediacion": [
         "Localizar el acceso al almacen de certificados (X509Store).",
         "Cargar los certificados desde fichero (PEM/PFX) en lugar del almacen del SO.",
-        "Externalizar la ruta/credenciales del certificado a configuracion.",
+        "Externalizar la ruta/credenciales del certificado a configuraciÃ³n.",
         "Probar en ambos SO."
       ]
     },
@@ -845,20 +845,20 @@
     {
       "id": "IDENTITY-WINDOWS",
       "categoria": "Identity",
-      "descripcion": "Uso de WindowsIdentity / WindowsPrincipal / WindowsImpersonationContext (autenticacion integrada de Windows).",
+      "descripcion": "Uso de WindowsIdentity / WindowsPrincipal / WindowsImpersonationContext (autenticaciÃ³n integrada de Windows).",
       "patron": { "tipo": "type", "valor": "System.Security.Principal.WindowsIdentity", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "La identidad de Windows no existe en Linux. Sustituir por un esquema de autenticacion multiplataforma (Kerberos/GSSAPI, tokens, LDAP).",
+      "alternativaLinux": "La identidad de Windows no existe en Linux. Sustituir por un esquema de autenticaciÃ³n multiplataforma (Kerberos/GSSAPI, tokens, LDAP).",
       "esfuerzo": { "optimista": 4, "masProbable": 16, "pesimista": 50 },
       "confianza": "Alta",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Localizar los usos de WindowsIdentity / WindowsPrincipal / impersonacion.",
-        "Definir una abstraccion de identidad (p. ej. IUserIdentity / IAuthenticationService) desacoplada del SO.",
+        "Definir una abstracciÃ³n de identidad (p. ej. IUserIdentity / IAuthenticationService) desacoplada del SO.",
         "Implementar en Windows con identidad integrada y en Linux con Kerberos/GSSAPI, LDAP o tokens.",
         "Sustituir la impersonacion por un modelo explicito de credenciales y roles.",
-        "Probar autenticacion y autorizacion en ambos SO."
+        "Probar autenticaciÃ³n y autorizacion en ambos SO."
       ]
     },
 
@@ -869,16 +869,16 @@
       "patron": { "tipo": "attribute", "valor": "System.STAThreadAttribute", "matchMode": "equals" },
       "severidad": "Medio",
       "esBloqueante": false,
-      "alternativaLinux": "Los apartamentos STA solo tienen sentido con COM/UI de Windows. En una libreria de negocio sin UI, normalmente se puede eliminar.",
+      "alternativaLinux": "Los apartamentos STA solo tienen sentido con COM/UI de Windows. En una librerÃ­a de negocio sin UI, normalmente se puede eliminar.",
       "esfuerzo": { "optimista": 0.5, "masProbable": 2, "pesimista": 8 },
       "confianza": "Media",
       "estrategiaSeparacion": "Comun",
       "notaComun": "El core queda comun tras quitar STA. Si un componente COM lo exige, mantener STAThread solo en el punto de entrada de la UI Windows (WPF), nunca en el core net8.0.",
       "pasosRemediacion": [
-        "Comprobar si el codigo marcado con STA usa realmente COM o UI; en el core de negocio no deberia.",
+        "Comprobar si el cÃ³digo marcado con STA usa realmente COM o UI; en el core de negocio no deberÃ­a.",
         "Eliminar STAThreadAttribute / ApartmentState.STA del core comun.",
-        "Si algun componente COM lo exige, dejar STA solo en el arranque de la UI Windows, fuera del core.",
-        "Probar el arranque y la ejecucion en Windows y Linux."
+        "Si algÃºn componente COM lo exige, dejar STA solo en el arranque de la UI Windows, fuera del core.",
+        "Probar el arranque y la ejecuciÃ³n en Windows y Linux."
       ]
     },
     {
@@ -888,11 +888,11 @@
       "patron": { "tipo": "type", "valor": "System.Windows.Threading.Dispatcher", "matchMode": "startsWith" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Dispatcher es parte de WPF (Windows). En logica de negocio, reemplazar la sincronizacion con contexto por async/await, IProgress<T> o SynchronizationContext neutro.",
+      "alternativaLinux": "Dispatcher es parte de WPF (Windows). En logica de negocio, reemplazar la sincronizaciÃ³n con contexto por async/await, IProgress<T> o SynchronizationContext neutro.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
       "confianza": "Alta",
       "estrategiaSeparacion": "Comun",
-      "notaComun": "En el core, reemplazar la sincronizacion por async/await lo vuelve comun; cada UI usa el Dispatcher de su framework.",
+      "notaComun": "En el core, reemplazar la sincronizaciÃ³n por async/await lo vuelve comun; cada UI usa el Dispatcher de su framework.",
       "pasosRemediacion": [
         "Localizar los usos de Dispatcher en logica de negocio.",
         "Reemplazar por async/await, IProgress<T> o un SynchronizationContext neutro.",
@@ -903,18 +903,18 @@
     {
       "id": "SYNC-NAMED-MUTEX",
       "categoria": "Threading",
-      "descripcion": "Creacion de Mutex con nombre (objeto de sincronizacion de ambito sistema).",
+      "descripcion": "Creacion de Mutex con nombre (objeto de sincronizaciÃ³n de ambito sistema).",
       "patron": { "tipo": "apiCall", "valor": "System.Threading.Mutex::.ctor", "matchMode": "startsWith", "nota": "Marcar solo cuando se usa el constructor con parametro de nombre." },
       "severidad": "Medio",
       "esBloqueante": false,
-      "alternativaLinux": "Los mutex con nombre existen en Linux (.NET los soporta con /tmp) pero la semantica entre procesos/usuarios y la limpieza difieren. Revisar el patron de single-instance.",
+      "alternativaLinux": "Los mutex con nombre existen en Linux (.NET los soporta con /tmp) pero la semÃ¡ntica entre procesos/usuarios y la limpieza difieren. Revisar el patron de single-instance.",
       "esfuerzo": { "optimista": 0.5, "masProbable": 2, "pesimista": 8 },
       "confianza": "Media",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Determinar el proposito (normalmente single-instance).",
         "Si es in-process, usar un lock gestionado.",
-        "Si es system-wide, abstraer tras IInterProcessLock (named mutex en Windows; file lock en Linux) y revisar la semantica.",
+        "Si es system-wide, abstraer tras IInterProcessLock (named mutex en Windows; file lock en Linux) y revisar la semÃ¡ntica.",
         "Probar el escenario en ambos SO."
       ]
     },
@@ -925,12 +925,12 @@
       "patron": { "tipo": "apiCall", "valor": "System.Threading.Semaphore::.ctor", "matchMode": "startsWith", "nota": "Marcar solo el constructor con nombre." },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Los semaforos con nombre (system-wide) NO estan soportados en Linux en .NET. Sustituir por SemaphoreSlim (in-process) o un mecanismo IPC alternativo.",
+      "alternativaLinux": "Los semaforos con nombre (system-wide) NO estÃ¡n soportados en Linux en .NET. Sustituir por SemaphoreSlim (in-process) o un mecanismo IPC alternativo.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
       "confianza": "Media",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Determinar si la sincronizacion es in-process o entre procesos.",
+        "Determinar si la sincronizaciÃ³n es in-process o entre procesos.",
         "Si es in-process, sustituir por SemaphoreSlim (comun a ambos SO).",
         "Si es entre procesos (system-wide), abstraer tras una interfaz IInterProcessLock e implementar por SO (named semaphore en Windows; file lock / socket / named pipe u otro IPC en Linux).",
         "Revisar la limpieza y el abandono del recurso en ambos SO.",
@@ -944,15 +944,15 @@
       "patron": { "tipo": "apiCall", "valor": "System.Threading.EventWaitHandle::.ctor", "matchMode": "startsWith", "nota": "Marcar solo el constructor con nombre." },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Los EventWaitHandle con nombre no estan soportados entre procesos en Linux. Rediseñar la senalizacion IPC.",
+      "alternativaLinux": "Los EventWaitHandle con nombre no estÃ¡n soportados entre procesos en Linux. Rediseñar la seÃ±alizaciÃ³n IPC.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
       "confianza": "Media",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
-        "Determinar si la senalizacion es in-process o entre procesos.",
+        "Determinar si la seÃ±alizaciÃ³n es in-process o entre procesos.",
         "In-process: usar ManualResetEventSlim/AutoResetEvent.",
-        "Entre procesos: abstraer la senalizacion IPC (named pipe, socket, fichero) por SO.",
-        "Probar la sincronizacion en ambos SO."
+        "Entre procesos: abstraer la seÃ±alizaciÃ³n IPC (named pipe, socket, fichero) por SO.",
+        "Probar la sincronizaciÃ³n en ambos SO."
       ]
     },
 
@@ -963,15 +963,15 @@
       "patron": { "tipo": "stringLiteral", "valor": "cmd.exe", "matchMode": "contains" },
       "severidad": "Alto",
       "esBloqueante": false,
-      "alternativaLinux": "El interprete de comandos difiere (bash/sh). Sustituir el comando o abstraer la ejecucion por SO. Preferir APIs gestionadas cuando sea posible.",
+      "alternativaLinux": "El intÃ©rprete de comandos difiere (bash/sh). Sustituir el comando o abstraer la ejecuciÃ³n por SO. Preferir APIs gestionadas cuando sea posible.",
       "esfuerzo": { "optimista": 1, "masProbable": 4, "pesimista": 12 },
       "confianza": "Media",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Localizar la invocacion de cmd.exe.",
         "Preferir una API gestionada equivalente cuando exista.",
-        "Si hay que ejecutar shell, abstraer el interprete por SO (cmd en Windows, sh/bash en Linux).",
-        "Probar la ejecucion en ambos SO."
+        "Si hay que ejecutar shell, abstraer el intÃ©rprete por SO (cmd en Windows, sh/bash en Linux).",
+        "Probar la ejecuciÃ³n en ambos SO."
       ]
     },
     {
@@ -999,14 +999,14 @@
       "patron": { "tipo": "stringLiteral", "valor": "(reg|sc|net|tasklist|taskkill|wmic|schtasks)\\.exe", "matchMode": "regex" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "Utilidades de linea de comandos de Windows sin equivalente directo. Sustituir por comandos/logica de Linux o APIs gestionadas.",
+      "alternativaLinux": "Utilidades de lÃ­nea de comandos de Windows sin equivalente directo. Sustituir por comandos/logica de Linux o APIs gestionadas.",
       "esfuerzo": { "optimista": 2, "masProbable": 8, "pesimista": 24 },
       "confianza": "Media",
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Identificar las utilidades Windows invocadas (reg, sc, net, wmic, etc.).",
         "Sustituir por APIs gestionadas o por el comando equivalente en Linux.",
-        "Abstraer la ejecucion por SO donde no haya equivalente directo.",
+        "Abstraer la ejecuciÃ³n por SO donde no haya equivalente directo.",
         "Probar en ambos SO."
       ]
     },
@@ -1018,14 +1018,14 @@
       "patron": { "tipo": "stringLiteral", "valor": "^[A-Za-z]:\\\\", "matchMode": "regex" },
       "severidad": "Medio",
       "esBloqueante": false,
-      "alternativaLinux": "Linux no usa letras de unidad. Externalizar rutas a configuracion y usar Path.Combine.",
+      "alternativaLinux": "Linux no usa letras de unidad. Externalizar rutas a configuraciÃ³n y usar Path.Combine.",
       "esfuerzo": { "optimista": 0.5, "masProbable": 3, "pesimista": 12 },
       "confianza": "Baja",
       "estrategiaSeparacion": "Comun",
-      "notaComun": "Rutas relativas + Path.Combine + configuracion externa funcionan en ambos SO.",
+      "notaComun": "Rutas relativas + Path.Combine + configuraciÃ³n externa funcionan en ambos SO.",
       "pasosRemediacion": [
-        "REVISION MANUAL (senal debil): confirmar que es una ruta real.",
-        "Externalizar la ruta a configuracion en vez de fijar una unidad de Windows.",
+        "REVISIÃ“N MANUAL (seÃ±al debil): confirmar que es una ruta real.",
+        "Externalizar la ruta a configuraciÃ³n en vez de fijar una unidad de Windows.",
         "Construir rutas con Path.Combine y evitar letras de unidad.",
         "Probar en ambos SO."
       ]
@@ -1043,7 +1043,7 @@
       "estrategiaSeparacion": "Comun",
       "notaComun": "Path.Combine/Path.DirectorySeparatorChar generan la ruta correcta en cada SO.",
       "pasosRemediacion": [
-        "REVISION MANUAL (alta tasa de falsos positivos): confirmar que es una ruta.",
+        "REVISIÃ“N MANUAL (alta tasa de falsos positivos): confirmar que es una ruta.",
         "Sustituir las concatenaciones de ruta por Path.Combine.",
         "Usar Path.DirectorySeparatorChar donde haga falta.",
         "Probar en ambos SO."
@@ -1052,7 +1052,7 @@
     {
       "id": "FS-SPECIALFOLDER-WINDOWS",
       "categoria": "FileSystem",
-      "descripcion": "Uso de Environment.SpecialFolder con carpetas especificas de Windows (ProgramFiles, Windows, System, etc.).",
+      "descripcion": "Uso de Environment.SpecialFolder con carpetas especÃ­ficas de Windows (ProgramFiles, Windows, System, etc.).",
       "patron": { "tipo": "apiCall", "valor": "System.Environment::GetFolderPath", "matchMode": "startsWith" },
       "severidad": "Bajo",
       "esBloqueante": false,
@@ -1063,7 +1063,7 @@
       "notaComun": "Environment.GetFolderPath existe en ambos SO, pero algunas carpetas devuelven rutas distintas o vacias.",
       "pasosRemediacion": [
         "Revisar cada SpecialFolder usada y su equivalencia en Linux.",
-        "Externalizar a configuracion las rutas que no tengan equivalente.",
+        "Externalizar a configuraciÃ³n las rutas que no tengan equivalente.",
         "Validar que la ruta obtenida existe y es escribible en ambos SO.",
         "Probar en ambos SO."
       ]
@@ -1076,7 +1076,7 @@
       "patron": { "tipo": "assemblyReference", "valor": "Oracle.DataAccess", "matchMode": "equals" },
       "severidad": "Bloqueante",
       "esBloqueante": true,
-      "alternativaLinux": "ODP.NET unmanaged es solo Windows. Migrar a Oracle.ManagedDataAccess.Core (100% gestionado, multiplataforma). Revisar diferencias de API y de cadena de conexion.",
+      "alternativaLinux": "ODP.NET unmanaged es solo Windows. Migrar a Oracle.ManagedDataAccess.Core (100% gestionado, multiplataforma). Revisar diferencias de API y de cadena de conexiÃ³n.",
       "esfuerzo": { "optimista": 4, "masProbable": 12, "pesimista": 32 },
       "confianza": "Alta",
       "estrategiaSeparacion": "ReemplazarDependencia",
@@ -1084,7 +1084,7 @@
       "pasosRemediacion": [
         "Anadir el paquete Oracle.ManagedDataAccess.Core.",
         "Reemplazar Oracle.DataAccess.Client por Oracle.ManagedDataAccess.Client.",
-        "Revisar diferencias de API y de cadena de conexion (TNS, EZConnect).",
+        "Revisar diferencias de API y de cadena de conexiÃ³n (TNS, EZConnect).",
         "Probar la conectividad y consultas en Windows y Linux."
       ]
     },
@@ -1103,8 +1103,8 @@
       "pasosRemediacion": [
         "Anadir el paquete Oracle.ManagedDataAccess.Core (100% gestionado, multiplataforma).",
         "Reemplazar los using System.Data.OracleClient por Oracle.ManagedDataAccess.Client.",
-        "Adaptar OracleConnection/OracleCommand/OracleDataAdapter y las cadenas de conexion al nuevo proveedor.",
-        "Revisar tipos y diferencias de API (parametros con nombre, tipos Oracle, secuencias).",
+        "Adaptar OracleConnection/OracleCommand/OracleDataAdapter y las cadenas de conexiÃ³n al nuevo proveedor.",
+        "Revisar tipos y diferencias de API (parÃ¡metros con nombre, tipos Oracle, secuencias).",
         "Probar la conectividad y las consultas en Windows y Linux."
       ]
     },
@@ -1133,13 +1133,13 @@
       "patron": { "tipo": "assemblyReference", "valor": "Oracle.ManagedDataAccess.Core", "matchMode": "equals" },
       "severidad": "Info",
       "esBloqueante": false,
-      "alternativaLinux": "Apto para Linux. No requiere accion; solo validar version y funcionalidad usada.",
+      "alternativaLinux": "Apto para Linux. No requiere accion; solo validar versiÃ³n y funcionalidad usada.",
       "esfuerzo": { "optimista": 0, "masProbable": 0, "pesimista": 2 },
       "confianza": "Alta",
       "estrategiaSeparacion": "Comun",
       "notaComun": "Ya es multiplataforma: vive en el core net8.0 sin cambios.",
       "pasosRemediacion": [
-        "Validar la version del paquete Oracle.ManagedDataAccess.Core.",
+        "Validar la versiÃ³n del paquete Oracle.ManagedDataAccess.Core.",
         "Revisar la funcionalidad usada por si hubiera notas de compatibilidad.",
         "Probar en Linux para confirmar."
       ]
@@ -1148,7 +1148,7 @@
     {
       "id": "MISC-CONSOLE-WINDOWS",
       "categoria": "Misc",
-      "descripcion": "Uso de APIs de consola especificas de Windows (Console.Beep con frecuencia/duracion, SetWindowSize, SetBufferSize, etc.).",
+      "descripcion": "Uso de APIs de consola especÃ­ficas de Windows (Console.Beep con frecuencia/duracion, SetWindowSize, SetBufferSize, etc.).",
       "patron": { "tipo": "apiCall", "valor": "System.Console::Beep", "matchMode": "startsWith" },
       "severidad": "Bajo",
       "esBloqueante": false,
@@ -1166,7 +1166,7 @@
     {
       "id": "MISC-WIN32EXCEPTION",
       "categoria": "Misc",
-      "descripcion": "Uso de System.ComponentModel.Win32Exception. Senal de que el codigo maneja errores de APIs Win32.",
+      "descripcion": "Uso de System.ComponentModel.Win32Exception. Senal de que el cÃ³digo maneja errores de APIs Win32.",
       "patron": { "tipo": "type", "valor": "System.ComponentModel.Win32Exception", "matchMode": "equals" },
       "severidad": "Info",
       "esBloqueante": false,
@@ -1176,9 +1176,9 @@
       "estrategiaSeparacion": "AbstraerPorPlataforma",
       "pasosRemediacion": [
         "Revisar el contexto donde se captura Win32Exception (indica interop Win32 cercana).",
-        "Comprobar la portabilidad del codigo que la lanza.",
+        "Comprobar la portabilidad del cÃ³digo que la lanza.",
         "Adaptar el manejo de errores al equivalente multiplataforma.",
-        "No es bloqueante por si mismo: priorizar segun el codigo asociado."
+        "No es bloqueante por si mismo: priorizar segÃºn el cÃ³digo asociado."
       ]
     }
   ]

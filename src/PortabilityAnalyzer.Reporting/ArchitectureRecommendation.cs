@@ -24,14 +24,14 @@ public static class ArchitectureRecommendation
 {
     private static readonly Dictionary<string, string> AbstractionByCategory = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Registry"] = "ISettingsStore -configuracion externa en vez del Registro",
-        ["Identity"] = "IUserIdentity / IAuthenticationService -identidad y autenticacion",
-        ["Threading"] = "IInterProcessLock -sincronizacion/senalizacion entre procesos",
-        ["PInvoke"] = "INativePlatform -llamadas nativas especificas por SO",
-        ["ProcessInvocation"] = "IProcessRunner -ejecucion de comandos del SO",
+        ["Registry"] = "ISettingsStore - configuración externa en vez del Registro",
+        ["Identity"] = "IUserIdentity / IAuthenticationService - identidad y autenticación",
+        ["Threading"] = "IInterProcessLock - sincronización/señalización entre procesos",
+        ["PInvoke"] = "INativePlatform - llamadas nativas específicas por SO",
+        ["ProcessInvocation"] = "IProcessRunner - ejecución de comandos del SO",
         ["COM"] = "Interfaz del servicio COM afectado",
-        ["Cryptography"] = "IProtectedDataStore -proteccion de secretos (si usa DPAPI)",
-        ["Misc"] = "Abstraccion especifica segun el caso"
+        ["Cryptography"] = "IProtectedDataStore - protección de secretos (si usa DPAPI)",
+        ["Misc"] = "Abstracción específica según el caso"
     };
 
     public static ArchitecturePlan Build(AnalysisReport report)
@@ -61,10 +61,10 @@ public static class ArchitectureRecommendation
 
         var projects = new List<RecommendedProject>
         {
-            new($"{baseName}.Core", "net8.0", "Logica de negocio comun (portable, sin dependencias de SO)."),
+            new($"{baseName}.Core", "net8.0", "Lógica de negocio común (portable, sin dependencias de SO)."),
             new($"{baseName}.Abstractions", "net8.0", "Interfaces de las capacidades dependientes de plataforma."),
-            new($"{baseName}.Platform.Windows", "net8.0-windows", "Implementacion Windows de las abstracciones (Registro, identidad, P/Invoke)."),
-            new($"{baseName}.Platform.Linux", "net8.0", "Implementacion Linux de las abstracciones (config, LDAP/Kerberos, equivalentes o no-op).")
+            new($"{baseName}.Platform.Windows", "net8.0-windows", "Implementación Windows de las abstracciones (Registro, identidad, P/Invoke)."),
+            new($"{baseName}.Platform.Linux", "net8.0", "Implementación Linux de las abstracciones (config, LDAP/Kerberos, equivalentes o no-op).")
         };
         if (hasUi)
         {
@@ -73,18 +73,18 @@ public static class ArchitectureRecommendation
         }
         else
         {
-            projects.Add(new($"{baseName}.Host", "net8.0", "Ejecutable/servicio multiplataforma (host comun)."));
+            projects.Add(new($"{baseName}.Host", "net8.0", "Ejecutable/servicio multiplataforma (host común)."));
         }
 
         var steps = new List<string>
         {
-            $"Extraer la logica de negocio a {baseName}.Core (net8.0), sin referencias a WPF/WinForms/Win32."
+            $"Extraer la lógica de negocio a {baseName}.Core (net8.0), sin referencias a WPF/WinForms/Win32."
         };
         if (abstractions.Count > 0)
             steps.Add($"Definir las abstracciones en {baseName}.Abstractions e inyectarlas por DI: {string.Join("; ", abstractions)}.");
         if (replacements.Count > 0)
             steps.Add($"Reemplazar las dependencias no portables por equivalentes multiplataforma: {string.Join(", ", replacements)}.");
-        steps.Add($"Implementar {baseName}.Platform.Windows y {baseName}.Platform.Linux con la version por SO de cada abstraccion.");
+        steps.Add($"Implementar {baseName}.Platform.Windows y {baseName}.Platform.Linux con la versión por SO de cada abstracción.");
         if (hasUi)
             steps.Add($"Mantener la UI WPF en {baseName}.App.Windows e implementar la UI de Linux en {baseName}.App.Linux con Avalonia, reutilizando ViewModels.");
         steps.Add("Configurar pruebas y CI que compilen y ejecuten en Windows y Linux (matriz de build).");
