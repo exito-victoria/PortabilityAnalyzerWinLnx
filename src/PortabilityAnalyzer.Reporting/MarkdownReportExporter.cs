@@ -19,6 +19,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
 
         AppendBucketSummary(sb, report.CostByBucket);
+        AppendThirdPartySection(sb, report);
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
         {
@@ -56,6 +57,41 @@ public sealed class MarkdownReportExporter : IReportExporter
         }
 
         File.WriteAllText(outputPath, sb.ToString());
+    }
+
+    /// <summary>Analisis en profundidad de los ensamblados de terceros (sin fuentes): dependencias
+    /// nativas del SO, APIs Windows gestionadas, riesgo y reemplazo sugerido.</summary>
+    private static void AppendThirdPartySection(StringBuilder sb, AnalysisReport report)
+    {
+        var profiles = ThirdPartyAnalysis.Analyze(report);
+        if (profiles.Count == 0) return;
+
+        sb.AppendLine("## Analisis de terceros (sin fuentes)");
+        sb.AppendLine();
+        sb.AppendLine("> Estos ensamblados son de terceros: no se dispone del codigo fuente ni control de su build. Verificar si el paquete tiene version multiplataforma; si no, reemplazarlo o encapsular su uso tras una interfaz.");
+        sb.AppendLine();
+
+        foreach (var p in profiles)
+        {
+            sb.AppendLine($"### {p.Assembly} (Severidad: {p.MaxSeverity})");
+            if (p.SuggestedReplacement is not null)
+                sb.AppendLine($"Reemplazo sugerido: **{Cell(p.SuggestedReplacement)}**  ");
+            sb.AppendLine($"APIs/referencias Windows gestionadas detectadas: {p.WindowsApiRules} regla(s)  ");
+            sb.AppendLine();
+
+            if (p.NativeDeps.Count > 0)
+            {
+                sb.AppendLine("| DLL nativa | Sitios P/Invoke | Tipo |");
+                sb.AppendLine("|------------|-----------------|------|");
+                foreach (var d in p.NativeDeps)
+                    sb.AppendLine($"| {Cell(d.Dll)} | {d.Sites} | {ThirdPartyAnalysis.DependencyKind(d)} |");
+            }
+            else
+            {
+                sb.AppendLine("Sin dependencias nativas P/Invoke detectadas (revisar referencias gestionadas).");
+            }
+            sb.AppendLine();
+        }
     }
 
     /// <summary>Resumen ejecutivo del coste por bucket multiplataforma (incluye Pruebas y CI).</summary>

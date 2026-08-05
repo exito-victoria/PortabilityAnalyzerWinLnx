@@ -41,6 +41,7 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para(string.Empty));
 
         AppendBucketSummary(b, report.CostByBucket);
+        AppendThirdPartySection(b, report);
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
         //                              Regla Sev  N   Esf  Ubic Estr Evid Alt  Pasos
@@ -118,6 +119,37 @@ public sealed class WordReportExporter : IReportExporter
             new PageMargin { Top = Margin, Bottom = Margin, Left = (uint)Margin, Right = (uint)Margin, Header = 360, Footer = 360, Gutter = 0 }));
 
         mainPart.Document.Save();
+    }
+
+    /// <summary>Analisis en profundidad de los ensamblados de terceros (sin fuentes).</summary>
+    private static void AppendThirdPartySection(Body b, AnalysisReport report)
+    {
+        var profiles = ThirdPartyAnalysis.Analyze(report);
+        if (profiles.Count == 0) return;
+
+        b.Append(Para("Analisis de terceros (sin fuentes)", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Estos ensamblados son de terceros: no se dispone del codigo fuente ni control de su build. Verificar si el paquete tiene version multiplataforma; si no, reemplazarlo o encapsular su uso tras una interfaz."));
+
+        foreach (var p in profiles)
+        {
+            b.Append(Para($"{p.Assembly} (Severidad: {p.MaxSeverity})", bold: true, sizeHalfPt: 24));
+            if (p.SuggestedReplacement is not null)
+                b.Append(Para($"Reemplazo sugerido: {p.SuggestedReplacement}"));
+            b.Append(Para($"APIs/referencias Windows gestionadas detectadas: {p.WindowsApiRules} regla(s)"));
+
+            if (p.NativeDeps.Count > 0)
+            {
+                b.Append(BuildTable(
+                    new[] { "DLL nativa", "Sitios P/Invoke", "Tipo" },
+                    new[] { 3.0, 1.5, 3.5 },
+                    p.NativeDeps.Select(d => new[] { d.Dll, d.Sites.ToString(), ThirdPartyAnalysis.DependencyKind(d) })));
+            }
+            else
+            {
+                b.Append(Para("Sin dependencias nativas P/Invoke detectadas (revisar referencias gestionadas)."));
+            }
+        }
+        b.Append(Para(string.Empty));
     }
 
     /// <summary>Resumen ejecutivo del coste por bucket multiplataforma (incluye Pruebas y CI).</summary>
