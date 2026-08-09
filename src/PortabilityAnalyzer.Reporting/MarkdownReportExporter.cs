@@ -11,12 +11,13 @@ public sealed class MarkdownReportExporter : IReportExporter
     public void Export(AnalysisReport report, string outputPath)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("# Informe de portabilidad Windows -> Linux");
+        sb.AppendLine("# Informe de análisis multiplataforma (.NET 8) - Windows / Linux");
         sb.AppendLine();
         sb.AppendLine($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}  ");
         sb.AppendLine($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}  ");
-        sb.AppendLine($"Esfuerzo total de desarrollo (horas) -> optimista: {report.TotalEffort.Optimista:0.#} | media: {report.TotalEffort.Media:0.#} | pesimista: {report.TotalEffort.Pesimista:0.#}");
+        sb.AppendLine($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h");
         sb.AppendLine();
+        AppendEstimationNote(sb);
 
         AppendBucketSummary(sb, report.CostByBucket);
         AppendArchitectureSection(sb, report);
@@ -129,6 +130,13 @@ public sealed class MarkdownReportExporter : IReportExporter
         }
     }
 
+    /// <summary>Nota de cabecera: explica la estrategia de estimación (en horas) y la columna N.</summary>
+    private static void AppendEstimationNote(StringBuilder sb)
+    {
+        sb.AppendLine("> **Cómo se estima (horas-persona).** Cada dependencia se estima a tres puntos: optimista (O), más probable (M) y pesimista (P); la **media = (O + 4*M + P) / 6** (PERT). El esfuerzo se cuenta **una vez por regla y ensamblado** (no por cada ocurrencia); a los **terceros** se les aplica un factor de incertidumbre; y se añade un bucket transversal de **Pruebas y CI**. El rango O-P es amplio a propósito (refleja la incertidumbre). La columna **N (ocurr.)** de las tablas es el **número de ocurrencias** de esa misma dependencia (regla + evidencia).");
+        sb.AppendLine();
+    }
+
     /// <summary>Resumen ejecutivo del coste por bucket multiplataforma (incluye Pruebas y CI).</summary>
     private static void AppendBucketSummary(StringBuilder sb, IReadOnlyList<BucketEffort> buckets)
     {
@@ -155,8 +163,8 @@ public sealed class MarkdownReportExporter : IReportExporter
     /// redundante con Severidad (un bloqueante tiene severidad Bloqueante).</summary>
     private static void AppendConfirmedTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | N | Esfuerzo (h) | Ubicación (ejemplo) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediación |");
-        sb.AppendLine("|-------|-----------|---|--------------|---------------------|------------|-----------|------------------------------------------|----------------------|");
+        sb.AppendLine("| Regla | Severidad | N (ocurr.) | Esfuerzo (h) | Ubicación (ejemplo) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediación |");
+        sb.AppendLine("|-------|-----------|------------|--------------|---------------------|------------|-----------|------------------------------------------|----------------------|");
         foreach (var g in groups)
         {
             var f = g.Representative;
@@ -171,8 +179,8 @@ public sealed class MarkdownReportExporter : IReportExporter
     /// <summary>Tabla de senal debil (confianza Baja): no cuenta esfuerzo; muestra una ubicacion de ejemplo.</summary>
     private static void AppendManualTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | Confianza | N | Evidencia | Ubicación (ejemplo) |");
-        sb.AppendLine("|-------|-----------|-----------|---|-----------|---------------------|");
+        sb.AppendLine("| Regla | Severidad | Confianza | N (ocurr.) | Evidencia | Ubicación (ejemplo) |");
+        sb.AppendLine("|-------|-----------|-----------|------------|-----------|---------------------|");
         foreach (var g in groups)
         {
             var f = g.Representative;

@@ -34,10 +34,11 @@ public sealed class WordReportExporter : IReportExporter
         mainPart.Document = new Document();
         var b = mainPart.Document.AppendChild(new Body());
 
-        b.Append(Para("Informe de portabilidad Windows -> Linux", bold: true, sizeHalfPt: 36));
+        b.Append(Para("Informe de análisis multiplataforma (.NET 8) - Windows / Linux", bold: true, sizeHalfPt: 36));
         b.Append(Para($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}"));
         b.Append(Para($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}"));
-        b.Append(Para($"Esfuerzo total de desarrollo (horas) -> optimista: {report.TotalEffort.Optimista:0.#} | media: {report.TotalEffort.Media:0.#} | pesimista: {report.TotalEffort.Pesimista:0.#}"));
+        b.Append(Para($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h"));
+        b.Append(Para("Cómo se estima (horas-persona): cada dependencia se estima a tres puntos O/M/P; media = (O + 4*M + P) / 6 (PERT). El esfuerzo se cuenta una vez por regla y ensamblado (no por ocurrencia); a los terceros se les aplica un factor de incertidumbre; se añade un bucket transversal de Pruebas y CI. El rango O-P es amplio a propósito. La columna N (ocurr.) es el número de ocurrencias de esa misma dependencia (regla + evidencia)."));
         b.Append(Para(string.Empty));
 
         AppendBucketSummary(b, report.CostByBucket);
@@ -69,7 +70,7 @@ public sealed class WordReportExporter : IReportExporter
             if (confirmed.Count > 0)
             {
                 b.Append(BuildTable(
-                    new[] { "Regla", "Severidad", "N", "Esfuerzo (h)", "Ubicación (ejemplo)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediación" },
+                    new[] { "Regla", "Severidad", "N (ocurr.)", "Esfuerzo (h)", "Ubicación (ejemplo)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediación" },
                     confirmedWeights,
                     confirmed.Select(g =>
                     {
@@ -97,7 +98,7 @@ public sealed class WordReportExporter : IReportExporter
                 b.Append(Para($"Revisión manual - señal débil, excluida del esfuerzo ({manual.Count} grupos / {ocurrencias} ocurrencias)",
                     bold: true, sizeHalfPt: 24));
                 b.Append(BuildTable(
-                    new[] { "Regla", "Severidad", "Confianza", "N", "Evidencia", "Ubicación (ejemplo)" },
+                    new[] { "Regla", "Severidad", "Confianza", "N (ocurr.)", "Evidencia", "Ubicación (ejemplo)" },
                     manualWeights,
                     manual.Select(g =>
                     {
