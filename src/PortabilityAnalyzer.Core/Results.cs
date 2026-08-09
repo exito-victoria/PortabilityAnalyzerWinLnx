@@ -57,4 +57,7 @@ public sealed record AnalysisReport
 
     /// <summary>Desglose del esfuerzo por bucket de coste multiplataforma (incluye Pruebas y CI).</summary>
     public IReadOnlyList<BucketEffort> CostByBucket { get; init; } = new List<BucketEffort>();
+
+    /// <summary>Hallazgos a nivel de codigo fuente (fichero/linea/segmento) con guia de correccion.</summary>
+    public IReadOnlyList<SourceFinding> SourceFindings { get; init; } = new List<SourceFinding>();
 }

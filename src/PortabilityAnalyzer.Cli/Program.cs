@@ -73,6 +73,16 @@ internal static class Program
                 .Select(g => g.First())
                 .ToList();
 
+            // Analisis a nivel de codigo fuente (solo si la entrada es .sln/.csproj y hay .cs).
+            IReadOnlyList<SourceFinding> sourceFindings = Array.Empty<SourceFinding>();
+            if (ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
+            {
+                var projects = new ProjectDiscovery().GetProjects(options.InputPath);
+                sourceFindings = new SourceCodeAnalyzer().AnalyzeProjects(projects);
+                Log.Information("Analisis de codigo fuente: {Count} hallazgos en {Files} ficheros",
+                    sourceFindings.Count, sourceFindings.Select(f => f.File).Distinct().Count());
+            }
+
             var results = new List<AssemblyAnalysisResult>();
             foreach (var asmRef in assemblies)
                 results.Add(engine.AnalyzeAssembly(asmRef.Path, asmRef.IsThirdParty));
@@ -94,7 +104,8 @@ internal static class Program
                 BlockerCount = results.Count(r => r.HasBlocker),
                 AnalyzedCount = analyzed.Count,
                 SkippedCount = results.Count - analyzed.Count,
-                CostByBucket = costByBucket
+                CostByBucket = costByBucket,
+                SourceFindings = sourceFindings
             };
 
             // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico

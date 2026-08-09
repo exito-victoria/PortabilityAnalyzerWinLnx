@@ -70,6 +70,21 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
             .ToList();
     }
 
+    /// <summary>Devuelve (nombre de proyecto, carpeta del proyecto) para el analisis de codigo fuente.</summary>
+    public IReadOnlyList<(string Name, string Dir)> GetProjects(string inputPath)
+    {
+        var fullPath = System.IO.Path.GetFullPath(inputPath);
+        if (!File.Exists(fullPath)) return Array.Empty<(string, string)>();
+
+        var csprojPaths = fullPath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            ? ResolveProjectsFromSolution(fullPath)
+            : new[] { fullPath };
+
+        return csprojPaths
+            .Select(c => (Name: ResolveAssemblyName(c), Dir: System.IO.Path.GetDirectoryName(c)!))
+            .ToList();
+    }
+
     /// <summary>Rutas absolutas de los .csproj referenciados por un .sln.</summary>
     private static IReadOnlyList<string> ResolveProjectsFromSolution(string solutionPath)
     {

@@ -22,6 +22,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         AppendBucketSummary(sb, report.CostByBucket);
         AppendArchitectureSection(sb, report);
         AppendThirdPartySection(sb, report);
+        AppendSourceSection(sb, report);
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
         {
@@ -92,6 +93,31 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             sb.AppendLine($"{i + 1}. {plan.MigrationSteps[i]}");
+        sb.AppendLine();
+    }
+
+    /// <summary>Analisis a nivel de codigo fuente: fichero/linea/segmento + como corregir.</summary>
+    private static void AppendSourceSection(StringBuilder sb, AnalysisReport report)
+    {
+        var findings = report.SourceFindings;
+        if (findings.Count == 0) return;
+
+        var files = findings.Select(f => f.File).Distinct().Count();
+        sb.AppendLine("## Análisis de código fuente (dónde y cómo corregir)");
+        sb.AppendLine();
+        sb.AppendLine("> Usos de APIs propias de Windows localizados en el **código fuente** (Roslyn): fichero, línea, el segmento de código y cómo corregirlo para multiplataforma.");
+        sb.AppendLine();
+        sb.AppendLine($"Total: **{findings.Count}** usos en **{files}** ficheros.");
+        sb.AppendLine();
+        sb.AppendLine("| Proyecto | Fichero:línea | Tipo | Símbolo | Clase / Método | Segmento de código | Cómo corregir |");
+        sb.AppendLine("|----------|---------------|------|---------|----------------|--------------------|---------------|");
+        foreach (var f in findings)
+        {
+            var loc = string.Join(" / ", new[] { f.Clase, f.Metodo }.Where(x => !string.IsNullOrEmpty(x)));
+            sb.AppendLine(
+                $"| {Cell(f.Project)} | {Cell($"{f.File}:{f.Line}")} | {f.Kind} | {Cell(f.Symbol)} " +
+                $"| {Cell(loc)} | {Cell(f.Segmento)} | {Cell(f.ComoCorregir)} |");
+        }
         sb.AppendLine();
     }
 

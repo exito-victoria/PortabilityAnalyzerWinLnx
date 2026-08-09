@@ -44,6 +44,7 @@ public sealed class WordReportExporter : IReportExporter
         AppendBucketSummary(b, report.CostByBucket);
         AppendArchitectureSection(b, report);
         AppendThirdPartySection(b, report);
+        AppendSourceSection(b, report);
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
         //                              Regla Sev  N   Esf  Ubic Estr Evid Alt  Pasos
@@ -147,6 +148,28 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para("Plan de migración", bold: true, sizeHalfPt: 24));
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             b.Append(Para($"{i + 1}. {plan.MigrationSteps[i]}"));
+        b.Append(Para(string.Empty));
+    }
+
+    /// <summary>Analisis a nivel de codigo fuente: fichero/linea/segmento + como corregir.</summary>
+    private static void AppendSourceSection(Body b, AnalysisReport report)
+    {
+        var findings = report.SourceFindings;
+        if (findings.Count == 0) return;
+        var files = findings.Select(f => f.File).Distinct().Count();
+
+        b.Append(Para("Análisis de código fuente (dónde y cómo corregir)", bold: true, sizeHalfPt: 28));
+        b.Append(Para($"Usos de APIs propias de Windows en el código fuente (Roslyn): {findings.Count} usos en {files} ficheros. Se indica fichero, línea, el segmento de código y la corrección multiplataforma."));
+
+        b.Append(BuildTable(
+            new[] { "Proyecto", "Fichero:línea", "Tipo", "Símbolo", "Clase / Método", "Segmento de código", "Cómo corregir" },
+            new[] { 1.5, 2.2, 0.9, 1.8, 1.8, 3.2, 3.4 },
+            findings.Select(f => new[]
+            {
+                f.Project, $"{f.File}:{f.Line}", f.Kind, f.Symbol,
+                string.Join(" / ", new[] { f.Clase, f.Metodo }.Where(x => !string.IsNullOrEmpty(x))),
+                f.Segmento, f.ComoCorregir
+            })));
         b.Append(Para(string.Empty));
     }
 
