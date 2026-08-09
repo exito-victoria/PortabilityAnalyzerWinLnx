@@ -11,6 +11,9 @@ internal sealed class CliOptions
     public required string InputPath { get; init; }
     public required string RulesPath { get; init; }
     public string? SchemaPath { get; init; }
+
+    /// <summary>Fichero JSON opcional con los roles de proyecto (API obligatoria, no modificables, divisibles por UI).</summary>
+    public string? RolesPath { get; init; }
     public string OutputPath { get; init; } = "portability-report.json";
 
     /// <summary>Formatos de salida solicitados. Una sola ejecucion puede generar varios informes
@@ -30,7 +33,7 @@ internal sealed class CliOptions
 
     public static CliOptions? Parse(string[] args)
     {
-        string? input = null, rules = null, schema = null, output = null, format = null;
+        string? input = null, rules = null, schema = null, output = null, format = null, rolesPath = null;
         bool assumeThirdParty = false;
         double thirdPartyFactor = 1.5;
         double testingFactor = 0.25;
@@ -43,6 +46,7 @@ internal sealed class CliOptions
                 case "--solution": input = Next(args, ref i); break;
                 case "--rules": rules = Next(args, ref i); break;
                 case "--schema": schema = Next(args, ref i); break;
+                case "--roles": rolesPath = Next(args, ref i); break;
                 case "--output": output = Next(args, ref i); break;
                 case "--format": format = Next(args, ref i); break;
 
@@ -78,6 +82,7 @@ internal sealed class CliOptions
             InputPath = input,
             RulesPath = rules,
             SchemaPath = schema,
+            RolesPath = rolesPath,
             OutputPath = output ?? "portability-report.json",
             Formats = ParseFormats(format),
             AssumeThirdParty = assumeThirdParty,
@@ -121,6 +126,7 @@ internal sealed class CliOptions
             "[--schema <schema.json>] [--output <salida>] [--format <lista>] " +
             "[--assume-third-party] [--third-party-factor <n>]" + Environment.NewLine +
             "  --path                    Solucion (.sln), proyecto (.csproj), directorio con DLLs o una DLL/EXE." + Environment.NewLine +
+            "  --roles <roles.json>      Roles de proyecto: API obligatoria, no modificables, divisibles por UI." + Environment.NewLine +
             "  --format                  json (por defecto) | markdown | word | all, o lista separada por comas" + Environment.NewLine +
             "                            (p. ej. 'word,markdown' -> una ejecucion, dos informes; la extension" + Environment.NewLine +
             "                            de cada uno se deriva de --output cuando se piden varios)." + Environment.NewLine +

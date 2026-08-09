@@ -72,6 +72,15 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine($"Objetivo: **core .NET 8 común** + **WPF en Windows** y **Avalonia en Linux**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
         sb.AppendLine();
 
+        if (plan.RoleNotes.Count > 0)
+        {
+            sb.AppendLine("### Roles y restricciones");
+            sb.AppendLine();
+            foreach (var n in plan.RoleNotes)
+                sb.AppendLine($"- {Cell(n)}");
+            sb.AppendLine();
+        }
+
         sb.AppendLine("### Estructura de proyectos propuesta");
         sb.AppendLine();
         sb.AppendLine("| Proyecto | TFM | Propósito |");

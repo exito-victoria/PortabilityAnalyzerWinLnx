@@ -60,4 +60,7 @@ public sealed record AnalysisReport
 
     /// <summary>Hallazgos a nivel de codigo fuente (fichero/linea/segmento) con guia de correccion.</summary>
     public IReadOnlyList<SourceFinding> SourceFindings { get; init; } = new List<SourceFinding>();
+
+    /// <summary>Roles de proyecto configurados (API obligatoria, no modificables, divisibles por UI).</summary>
+    public ProjectRoles Roles { get; init; } = new();
 }

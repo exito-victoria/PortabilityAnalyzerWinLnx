@@ -11,6 +11,7 @@ public sealed record ArchitecturePlan(
     IReadOnlyList<string> Abstractions,
     IReadOnlyList<string> Replacements,
     IReadOnlyList<string> MigrationSteps,
+    IReadOnlyList<string> RoleNotes,
     bool HasUi,
     EffortEstimate TotalWithTesting,
     int Blockers);
@@ -91,9 +92,38 @@ public static class ArchitectureRecommendation
             steps.Add($"Mantener la UI WPF en {baseName}.App.Windows e implementar la UI de Linux en {baseName}.App.Linux con Avalonia, reutilizando ViewModels.");
         steps.Add("Configurar pruebas y CI que compilen y ejecuten en Windows y Linux (matriz de build).");
 
+        var roleNotes = BuildRoleNotes(report);
+
         var totalWithTesting = report.CostByBucket.Aggregate(EffortEstimate.Zero, (a, b) => a.Add(b.Effort));
 
-        return new ArchitecturePlan(projects, abstractions, replacements, steps, hasUi, totalWithTesting, report.BlockerCount);
+        return new ArchitecturePlan(projects, abstractions, replacements, steps, roleNotes, hasUi, totalWithTesting, report.BlockerCount);
+    }
+
+    /// <summary>Notas segun el rol configurado de cada proyecto (API obligatoria, no modificable, divisible).</summary>
+    private static IReadOnlyList<string> BuildRoleNotes(AnalysisReport report)
+    {
+        var notes = new List<string>();
+        if (report.Roles.IsEmpty) return notes;
+
+        foreach (var a in report.Assemblies.Where(x => x.Classification.Kind == AssemblyKind.Managed))
+        {
+            var name = a.Classification.Name;
+            var confirmados = a.ConfirmedFindings().Count();
+            var bloqueantes = a.ConfirmedFindings().Count(f => f.EsBloqueante);
+            switch (report.Roles.RoleOf(name))
+            {
+                case ProjectRole.ObligatorioMultiplataforma:
+                    notes.Add($"{name} - API obligatoria multiplataforma (PRIORIDAD MAXIMA). Hoy no es API: debe convertirse en API multiplataforma. Bloqueantes a resolver: {bloqueantes}.");
+                    break;
+                case ProjectRole.NoModificable:
+                    notes.Add($"{name} - proveedor externo, NO MODIFICABLE: la adaptacion la debe hacer el proveedor. Su esfuerzo no se imputa a nuestro total; verificar si existe version/soporte Linux del paquete.");
+                    break;
+                case ProjectRole.DivisiblePorUI:
+                    notes.Add($"{name} - DIVIDIR: extraer lo dependiente de Windows a un proyecto nuevo (p. ej. {name}.Windows) - {confirmados} usos Windows detectados - y dejar {name} limpio/multiplataforma.");
+                    break;
+            }
+        }
+        return notes;
     }
 
     /// <summary>Nombre simple de una evidencia (recorta el nombre completo de ensamblado antes de la coma).</summary>

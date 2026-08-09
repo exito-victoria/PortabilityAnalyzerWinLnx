@@ -83,18 +83,44 @@ internal static class Program
                     sourceFindings.Count, sourceFindings.Select(f => f.File).Distinct().Count());
             }
 
+            // Roles de proyecto (opcional): API obligatoria, no modificables, divisibles por UI.
+            var roles = new ProjectRoles();
+            if (options.RolesPath is not null && File.Exists(options.RolesPath))
+            {
+                try
+                {
+                    roles = System.Text.Json.JsonSerializer.Deserialize<ProjectRoles>(
+                        File.ReadAllText(options.RolesPath),
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new ProjectRoles();
+                    Log.Information("Roles de proyecto: {O} obligatorios, {N} no modificables, {D} divisibles por UI",
+                        roles.ObligatorioMultiplataforma.Count, roles.NoModificables.Count, roles.DivisiblePorUI.Count);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "No se pudieron cargar los roles de {Path}", options.RolesPath);
+                }
+            }
+
             var results = new List<AssemblyAnalysisResult>();
             foreach (var asmRef in assemblies)
                 results.Add(engine.AnalyzeAssembly(asmRef.Path, asmRef.IsThirdParty));
 
             // 4) Agregar y exportar.
             var analyzed = results.Where(r => r.Classification.Kind == AssemblyKind.Managed).ToList();
-            var total = analyzed.Select(r => r.Effort)
-                                .Aggregate(EffortEstimate.Zero, (acc, e) => acc.Add(e));
+
+            // El esfuerzo NO incluye los ensamblados con rol "no modificable" (proveedor externo):
+            // su adaptacion la debe hacer el proveedor, no se imputa a nuestro total.
+            var imputables = results
+                .Where(r => roles.RoleOf(r.Classification.Name) != ProjectRole.NoModificable)
+                .ToList();
+            var total = imputables
+                .Where(r => r.Classification.Kind == AssemblyKind.Managed)
+                .Select(r => r.Effort)
+                .Aggregate(EffortEstimate.Zero, (acc, e) => acc.Add(e));
 
             // Desglose del coste por bucket multiplataforma (incluye Pruebas y CI transversal).
             var costByBucket = new CostBucketEstimator(options.ThirdPartyFactor, options.TestingFactor)
-                .Compute(results);
+                .Compute(imputables);
 
             var report = new AnalysisReport
             {
@@ -105,7 +131,8 @@ internal static class Program
                 AnalyzedCount = analyzed.Count,
                 SkippedCount = results.Count - analyzed.Count,
                 CostByBucket = costByBucket,
-                SourceFindings = sourceFindings
+                SourceFindings = sourceFindings,
+                Roles = roles
             };
 
             // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico

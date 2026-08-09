@@ -132,6 +132,13 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para("Arquitectura destino recomendada y plan de migración", bold: true, sizeHalfPt: 28));
         b.Append(Para($"Objetivo: core .NET 8 común + WPF en Windows y Avalonia en Linux. Esfuerzo total estimado (con Pruebas y CI): {plan.TotalWithTesting.Media:0.#} h (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}."));
 
+        if (plan.RoleNotes.Count > 0)
+        {
+            b.Append(Para("Roles y restricciones", bold: true, sizeHalfPt: 24));
+            foreach (var n in plan.RoleNotes)
+                b.Append(Para($"- {n}"));
+        }
+
         b.Append(Para("Estructura de proyectos propuesta", bold: true, sizeHalfPt: 24));
         b.Append(BuildTable(
             new[] { "Proyecto", "TFM", "Propósito" },
