@@ -51,7 +51,8 @@ public static class ArchitectureRecommendation
             .Where(f => f.EstrategiaSeparacion == SeparationStrategy.ReemplazarDependencia && !string.IsNullOrEmpty(f.Evidencia))
             .Select(f => ShortName(f.Evidencia!))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(10)
+            .Select(src => TargetFor(src) is { } tgt ? $"{src} -> {tgt}" : $"{src} (buscar equivalente multiplataforma)")
+            .Take(12)
             .ToList();
 
         var baseName = (report.Assemblies
@@ -83,7 +84,8 @@ public static class ArchitectureRecommendation
         if (abstractions.Count > 0)
             steps.Add($"Definir las abstracciones en {baseName}.Abstractions e inyectarlas por DI: {string.Join("; ", abstractions)}.");
         if (replacements.Count > 0)
-            steps.Add($"Reemplazar las dependencias no portables por equivalentes multiplataforma: {string.Join(", ", replacements)}.");
+            steps.Add($"Reemplazar las dependencias no portables por su equivalente multiplataforma " +
+                      $"(el detalle y los pasos están en 'Alternativa Linux' y 'Pasos de remediación' de cada dependencia): {string.Join("; ", replacements)}.");
         steps.Add($"Implementar {baseName}.Platform.Windows y {baseName}.Platform.Linux con la versión por SO de cada abstracción.");
         if (hasUi)
             steps.Add($"Mantener la UI WPF en {baseName}.App.Windows e implementar la UI de Linux en {baseName}.App.Linux con Avalonia, reutilizando ViewModels.");
@@ -100,4 +102,27 @@ public static class ArchitectureRecommendation
         var comma = evidence.IndexOf(',');
         return (comma > 0 ? evidence[..comma] : evidence).Trim();
     }
+
+    // Equivalente multiplataforma conocido por dependencia (origen -> destino sugerido).
+    private static readonly (string Src, string Target)[] ReplacementTargets =
+    {
+        ("System.Data.OracleClient", "Oracle.ManagedDataAccess.Core (ODP.NET gestionado)"),
+        ("Oracle.DataAccess", "Oracle.ManagedDataAccess.Core"),
+        ("Oracle.ManagedDataAccess", "Oracle.ManagedDataAccess.Core"),
+        ("System.Data.SqlClient", "Microsoft.Data.SqlClient"),
+        ("System.Drawing.Common", "SkiaSharp o ImageSharp"),
+        ("System.Diagnostics.EventLog", "Serilog / Microsoft.Extensions.Logging (fichero/syslog)"),
+        ("System.Diagnostics.PerformanceCounter", "EventCounters / System.Diagnostics.Metrics"),
+        ("System.Messaging", "RabbitMQ o Azure Service Bus"),
+        ("System.ServiceModel", "CoreWCF o gRPC / ASP.NET Core"),
+        ("System.DirectoryServices", "System.DirectoryServices.Protocols o Novell.Directory.Ldap"),
+        ("System.Speech", "servicio de voz multiplataforma (motor externo/cloud)"),
+        ("System.Security.Cryptography.ProtectedData", "AES con clave externa / gestor de secretos")
+    };
+
+    /// <summary>Equivalente multiplataforma sugerido para una dependencia, o null si no se conoce.</summary>
+    private static string? TargetFor(string src) =>
+        ReplacementTargets.FirstOrDefault(t =>
+            src.Equals(t.Src, StringComparison.OrdinalIgnoreCase) ||
+            src.StartsWith(t.Src, StringComparison.OrdinalIgnoreCase)).Target;
 }
