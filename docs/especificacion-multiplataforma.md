@@ -205,12 +205,13 @@ con trazabilidad completa, clasificación y esfuerzo. Conserva **cada ocurrencia
   `App.Windows` WPF / `App.Linux` Avalonia), la **capa de abstracción** derivada de los hallazgos
   (`ISettingsStore`, `IUserIdentity`, `IInterProcessLock`, `INativePlatform`, …) y un **plan de
   migración** por pasos, con el esfuerzo total (incluidas Pruebas y CI) y el nº de bloqueantes.
-- **Fase 5 — En curso (requisitos del cliente).** Ver §12. Análisis a nivel de **código fuente**
-  (Roslyn) con segmento de código y corrección; métrica de **clases/ficheros afectados por paquete**;
-  cabecera con la **estrategia de estimación** (en horas); aclarar la columna **N**; enfoque **API
-  multiplataforma** (`ProgrammingManagerService`/`ProgrammingManagerLib`) con **roles de proyecto
-  configurables**; proveedores externos (ACRA/XMA/Safran) marcados **no modificables** con
-  investigación de soporte Linux.
+- **Fase 5 — Hecho (requisitos del cliente).** Ver §12. Hecho: análisis a nivel de **código fuente**
+  (Roslyn) con segmento y corrección; **impacto por proyecto** (clases/ficheros afectados); cabecera
+  con la **estrategia de estimación** (en horas); columna **N** aclarada; título/lenguaje
+  **multiplataforma**; **roles de proyecto** (`--roles`) con API obligatoria, no modificables (su
+  esfuerzo no se imputa) y divisibles por UI; equivalente concreto en el paso de reemplazo; **bug de
+  tildes** corregido. **Pendiente**: investigación específica del soporte Linux de los paquetes de
+  ACRA/XMA/Safran (requiere sus DLLs/paquetes reales, disponibles en el análisis del cliente).
 
 ---
 
