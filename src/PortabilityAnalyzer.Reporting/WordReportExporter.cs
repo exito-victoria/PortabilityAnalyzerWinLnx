@@ -44,6 +44,7 @@ public sealed class WordReportExporter : IReportExporter
         AppendBucketSummary(b, report.CostByBucket);
         AppendArchitectureSection(b, report);
         AppendThirdPartySection(b, report);
+        AppendImpactSection(b, report);
         AppendSourceSection(b, report);
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
@@ -155,6 +156,31 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para("Plan de migración", bold: true, sizeHalfPt: 24));
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             b.Append(Para($"{i + 1}. {plan.MigrationSteps[i]}"));
+        b.Append(Para(string.Empty));
+    }
+
+    /// <summary>Métrica de impacto: clases y ficheros afectados por proyecto.</summary>
+    private static void AppendImpactSection(Body b, AnalysisReport report)
+    {
+        if (report.SourceFindings.Count == 0) return;
+
+        b.Append(Para("Impacto por proyecto (clases y ficheros afectados)", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Métrica de tamaño del cambio (además de las horas): cuántas clases y ficheros de cada proyecto usan APIs de Windows."));
+
+        var rows = report.SourceFindings
+            .GroupBy(f => f.Project)
+            .OrderByDescending(g => g.Count())
+            .Select(g =>
+            {
+                var ficheros = g.Select(f => f.File).Distinct().OrderBy(x => x).ToList();
+                var clases = g.Where(f => !string.IsNullOrEmpty(f.Clase)).Select(f => f.Clase!).Distinct().Count();
+                return new[] { g.Key, ficheros.Count.ToString(), clases.ToString(), g.Count().ToString(), string.Join(", ", ficheros) };
+            });
+
+        b.Append(BuildTable(
+            new[] { "Proyecto", "Ficheros afectados", "Clases afectadas", "Usos Windows", "Ficheros" },
+            new[] { 2.0, 1.4, 1.4, 1.2, 4.0 },
+            rows));
         b.Append(Para(string.Empty));
     }
 

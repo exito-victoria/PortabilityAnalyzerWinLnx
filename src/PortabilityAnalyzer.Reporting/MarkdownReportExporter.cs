@@ -22,6 +22,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         AppendBucketSummary(sb, report.CostByBucket);
         AppendArchitectureSection(sb, report);
         AppendThirdPartySection(sb, report);
+        AppendImpactSection(sb, report);
         AppendSourceSection(sb, report);
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
@@ -102,6 +103,26 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             sb.AppendLine($"{i + 1}. {plan.MigrationSteps[i]}");
+        sb.AppendLine();
+    }
+
+    /// <summary>Métrica de impacto: clases y ficheros afectados por proyecto (además de las horas).</summary>
+    private static void AppendImpactSection(StringBuilder sb, AnalysisReport report)
+    {
+        if (report.SourceFindings.Count == 0) return;
+
+        sb.AppendLine("## Impacto por proyecto (clases y ficheros afectados)");
+        sb.AppendLine();
+        sb.AppendLine("> Métrica de tamaño del cambio (además de las horas): cuántas clases y ficheros de cada proyecto usan APIs de Windows.");
+        sb.AppendLine();
+        sb.AppendLine("| Proyecto | Ficheros afectados | Clases afectadas | Usos Windows | Ficheros |");
+        sb.AppendLine("|----------|--------------------|------------------|--------------|----------|");
+        foreach (var g in report.SourceFindings.GroupBy(f => f.Project).OrderByDescending(g => g.Count()))
+        {
+            var ficheros = g.Select(f => f.File).Distinct().OrderBy(x => x).ToList();
+            var clases = g.Where(f => !string.IsNullOrEmpty(f.Clase)).Select(f => f.Clase!).Distinct().Count();
+            sb.AppendLine($"| {Cell(g.Key)} | {ficheros.Count} | {clases} | {g.Count()} | {Cell(string.Join(", ", ficheros))} |");
+        }
         sb.AppendLine();
     }
 
