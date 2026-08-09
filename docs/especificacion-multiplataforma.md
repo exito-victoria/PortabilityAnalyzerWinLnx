@@ -248,14 +248,30 @@ legacy** y el **ICD importer legacy**). "Multiplataforma general" (más allá de
    regla+evidencia (se muestra una fila por dependencia y `N` indica cuántas veces aparece).
 5. **Lenguaje multiplataforma.** Redactar en términos de **multiplataforma** (no solo el par
    Windows-Linux), manteniendo el foco urgente en Windows↔Linux vía API.
-6. **Roles de proyecto configurables.** Un fichero/parámetro define el papel de cada proyecto por
-   nombre: **obligatorio-multiplataforma** (`ProgrammingManagerService`, `ProgrammingManagerLib`),
-   **no modificable / de terceros** (`ACRA`, `XMA`, `Safran`) y **divisible por dependencias de UI**
-   (`ToolsCommon`, que se puede partir para aislar la interfaz). La recomendación de arquitectura los
-   tiene en cuenta.
-7. **Proveedores externos (ACRA, XMA, Safran).** Marcarlos como **no nuestros: no se pueden migrar ni
-   modificar**. Aun así, analizar sus DLLs e **investigar si existe soporte Linux** del paquete
-   correspondiente; el informe incluye la **restricción** y la **vía viable** (o su ausencia).
+6. **Roles de proyecto — fichero de configuración `--roles` (JSON).** Define el papel de cada proyecto
+   por nombre. La recomendación de arquitectura y las métricas usan estos roles:
+   - **`obligatorioMultiplataforma`** (`ProgrammingManagerService`, `ProgrammingManagerLib`): hoy
+     **no son API**; deben **convertirse en una API multiplataforma**. Prioridad máxima; sus
+     bloqueantes son los críticos.
+   - **`noModificables`** (`ACRA`, `XMA`, `Safran`): de terceros. Se **analizan** sus DLLs, pero **no
+     podemos hacerlas multiplataforma nosotros** — es responsabilidad del **proveedor**; su esfuerzo
+     **no se cuenta como nuestro**. Se indica si existe versión/soporte Linux.
+   - **`divisiblePorUI`** (`ToolsCommon`): es nuestra y hay que **dividirla**: extraer **todo lo que
+     depende de Windows** a un **proyecto nuevo** y dejar el resto **limpio/multiplataforma**. Al
+     analizarla, el informe **propone explícitamente esa separación** (qué va a la parte limpia y qué
+     a la parte Windows).
+   Ejemplo de fichero:
+   ```json
+   {
+     "obligatorioMultiplataforma": ["ProgrammingManagerService", "ProgrammingManagerLib"],
+     "noModificables":            ["ACRA", "XMA", "Safran"],
+     "divisiblePorUI":            ["ToolsCommon"]
+   }
+   ```
+7. **Proveedores externos (ACRA, XMA, Safran).** No nuestros: **no se pueden migrar ni modificar** (lo
+   debe hacer el proveedor). Aun así, analizar sus DLLs e **investigar si existe soporte/versión
+   Linux** del paquete; el informe incluye la **restricción** y la **vía viable** (o su ausencia), y su
+   esfuerzo **no se imputa** al total nuestro.
 
 **Contrato de salida:** se **mantiene**; estos cambios **añaden** campos/secciones. La columna `N`
 (solo Markdown/Word) se **aclara**, no se elimina.
