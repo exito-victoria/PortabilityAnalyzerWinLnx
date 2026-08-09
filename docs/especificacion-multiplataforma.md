@@ -113,16 +113,17 @@ DirectoryServices/ServiceProcess/EventLog/PerformanceCounter/Drawing), atributos
 Registro, invocación de comandos del SO, supuestos de sistema de ficheros, hilos/sincronización
 (STA, Dispatcher, Mutex/Semaphore con nombre), Oracle (unmanaged→managed) y otros.**
 
-### Catálogo de reglas (data-driven) y su ampliación prevista
-El conocimiento vive en un **catálogo JSON externo** validado por **JSON Schema**. Cada regla actual:
-`id`, `categoria`, `patron`, `severidad`, `esBloqueante`, `alternativaLinux`, `esfuerzo`, `confianza`.
-
-**Ampliación prevista (Fase 1)** para dar el paso a paso de §3–§4, añadiendo a cada regla:
+### Catálogo de reglas (data-driven)
+El conocimiento vive en un **catálogo JSON externo** validado por **JSON Schema**. Cada regla incluye:
+`id`, `categoria`, `patron`, `severidad`, `esBloqueante`, `alternativaLinux`, `esfuerzo`, `confianza`,
+y —**ampliación de la Fase 1, ya hecha** para dar el paso a paso de §3–§4:
 - `pasosRemediacion`: lista de pasos concretos para resolverlo.
 - `estrategiaSeparacion`: `Comun` | `AbstraerPorPlataforma` | `ReemplazarDependencia` | `RedisenoUI`.
 - `notaComun`: si la librería puede ser común, cómo manejarlo (TFM, guardas de SO, DI).
-- desglose de esfuerzo por bucket cuando aplique (separación / UI / reemplazo / pruebas).
-Debe actualizarse también el JSON Schema y mantenerse la compatibilidad del cargador.
+
+Las **62 reglas** están pobladas y el **JSON Schema se amplió** en consecuencia, manteniendo la
+compatibilidad del cargador. El **desglose de esfuerzo por bucket** (Fase 2) no se almacena por regla:
+se deriva de la `estrategiaSeparacion` de cada hallazgo.
 
 ---
 
