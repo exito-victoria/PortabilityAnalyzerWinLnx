@@ -205,6 +205,12 @@ con trazabilidad completa, clasificación y esfuerzo. Conserva **cada ocurrencia
   `App.Windows` WPF / `App.Linux` Avalonia), la **capa de abstracción** derivada de los hallazgos
   (`ISettingsStore`, `IUserIdentity`, `IInterProcessLock`, `INativePlatform`, …) y un **plan de
   migración** por pasos, con el esfuerzo total (incluidas Pruebas y CI) y el nº de bloqueantes.
+- **Fase 5 — En curso (requisitos del cliente).** Ver §12. Análisis a nivel de **código fuente**
+  (Roslyn) con segmento de código y corrección; métrica de **clases/ficheros afectados por paquete**;
+  cabecera con la **estrategia de estimación** (en horas); aclarar la columna **N**; enfoque **API
+  multiplataforma** (`ProgrammingManagerService`/`ProgrammingManagerLib`) con **roles de proyecto
+  configurables**; proveedores externos (ACRA/XMA/Safran) marcados **no modificables** con
+  investigación de soporte Linux.
 
 ---
 
@@ -215,3 +221,45 @@ con trazabilidad completa, clasificación y esfuerzo. Conserva **cada ocurrencia
 3. Donde una API o comportamiento dependa de la versión de .NET o de un paquete, **decláralo como
    suposición a verificar**.
 4. Trabaja en la **rama `multiplataformWnLx`** para este bloque de cambios.
+
+---
+
+## 12. Requisitos del cliente (batch prueba-cliente)
+
+**Objetivo urgente:** que la **API** sea multiplataforma **Windows ↔ Linux** — en concreto
+**`ProgrammingManagerService`** y **`ProgrammingManagerLib`** (de ellas dependen **FIDA**, el **PRM
+legacy** y el **ICD importer legacy**). "Multiplataforma general" (más allá de Windows-Linux) es una
+**ampliación de alcance posterior**; el foco actual sigue siendo Windows↔Linux vía API.
+
+1. **Análisis a nivel de código fuente (nuevo).** Además del IL, leer los `.cs` con **Roslyn**
+   (análisis sintáctico) y localizar los usos de APIs propias de Windows (directivas `using`, tipos,
+   llamadas a métodos). Por cada uso: **fichero + línea**, el **segmento de código** afectado, el
+   `using`/clase/método implicado y **cómo corregirlo** para multiplataforma. Aplica a `.sln` y a
+   `.csproj`. En desarrollo se prueba con los ejemplos (que tienen `.cs`); el análisis real será sobre
+   `ProgrammingManagerService`, `ProgrammingManagerLib` y `ToolsCommon`, cuyo código fuente estará
+   disponible en tiempo de ejecución.
+2. **Métrica de impacto (además de las horas).** Por paquete (proyecto/ensamblado): **recuento y lista
+   de clases y ficheros afectados**, con desglose por **espacio de nombres**. Da idea del tamaño del
+   cambio independientemente de las horas.
+3. **Cabecera del informe.** Incluir una **descripción concisa de la estrategia de estimación** (PERT
+   O/Media/P; factor de terceros; Pruebas y CI) y **aclarar explícitamente que las cifras son horas**.
+   El rango optimista–pesimista es ancho por naturaleza: explicarlo.
+4. **Columna `N`.** Aclarar su significado en el informe: **nº de ocurrencias agregadas** de la misma
+   regla+evidencia (se muestra una fila por dependencia y `N` indica cuántas veces aparece).
+5. **Lenguaje multiplataforma.** Redactar en términos de **multiplataforma** (no solo el par
+   Windows-Linux), manteniendo el foco urgente en Windows↔Linux vía API.
+6. **Roles de proyecto configurables.** Un fichero/parámetro define el papel de cada proyecto por
+   nombre: **obligatorio-multiplataforma** (`ProgrammingManagerService`, `ProgrammingManagerLib`),
+   **no modificable / de terceros** (`ACRA`, `XMA`, `Safran`) y **divisible por dependencias de UI**
+   (`ToolsCommon`, que se puede partir para aislar la interfaz). La recomendación de arquitectura los
+   tiene en cuenta.
+7. **Proveedores externos (ACRA, XMA, Safran).** Marcarlos como **no nuestros: no se pueden migrar ni
+   modificar**. Aun así, analizar sus DLLs e **investigar si existe soporte Linux** del paquete
+   correspondiente; el informe incluye la **restricción** y la **vía viable** (o su ausencia).
+
+**Contrato de salida:** se **mantiene**; estos cambios **añaden** campos/secciones. La columna `N`
+(solo Markdown/Word) se **aclara**, no se elimina.
+
+**Nota — bug corregido:** las tildes del informe salían con caracteres raros (`autenticaciÃ³n`) por
+un problema de codificación al poblar el catálogo (PowerShell 5.1 leía el script como Windows-1252);
+corregido — el catálogo queda en UTF-8 correcto.
