@@ -113,7 +113,7 @@ public static class ArchitectureRecommendation
             switch (report.Roles.RoleOf(name))
             {
                 case ProjectRole.ObligatorioMultiplataforma:
-                    notes.Add($"{name} - API obligatoria multiplataforma (PRIORIDAD MAXIMA). Hoy no es API: debe convertirse en API multiplataforma. Bloqueantes a resolver: {bloqueantes}.");
+                    notes.Add($"{name} - debe ser multiplataforma (PRIORIDAD MAXIMA). Ya convertida en API en otra rama; aqui se analizan los CAMBIOS necesarios para que sea multiplataforma. Bloqueantes a resolver: {bloqueantes}.");
                     break;
                 case ProjectRole.NoModificable:
                     notes.Add($"{name} - proveedor externo, NO MODIFICABLE: la adaptacion la debe hacer el proveedor. Su esfuerzo no se imputa a nuestro total; verificar si existe version/soporte Linux del paquete.");

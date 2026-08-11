@@ -63,4 +63,7 @@ public sealed record AnalysisReport
 
     /// <summary>Roles de proyecto configurados (API obligatoria, no modificables, divisibles por UI).</summary>
     public ProjectRoles Roles { get; init; } = new();
+
+    /// <summary>Scaffolds de division generados para los proyectos con rol divisiblePorUI.</summary>
+    public IReadOnlyList<SplitResult> SplitResults { get; init; } = new List<SplitResult>();
 }

@@ -21,9 +21,11 @@ public sealed class MarkdownReportExporter : IReportExporter
 
         AppendBucketSummary(sb, report.CostByBucket);
         AppendArchitectureSection(sb, report);
+        AppendSplitSection(sb, report);
         AppendThirdPartySection(sb, report);
         AppendImpactSection(sb, report);
         AppendSourceSection(sb, report);
+        AppendCodeExamplesSection(sb, report);
 
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
         {
@@ -104,6 +106,59 @@ public sealed class MarkdownReportExporter : IReportExporter
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             sb.AppendLine($"{i + 1}. {plan.MigrationSteps[i]}");
         sb.AppendLine();
+    }
+
+    /// <summary>Scaffold de división de los proyectos con rol divisiblePorUI (dos proyectos generados).</summary>
+    private static void AppendSplitSection(StringBuilder sb, AnalysisReport report)
+    {
+        if (report.SplitResults.Count == 0) return;
+
+        sb.AppendLine("## División de proyectos (scaffold generado)");
+        sb.AppendLine();
+        sb.AppendLine("> Para los proyectos con rol `divisiblePorUI` se han generado **dos proyectos** en la carpeta de salida: una parte **multiplataforma** (net8.0) y otra **Windows** (net8.0-windows). Es un **punto de partida**: revisar las referencias cruzadas y las acciones pendientes.");
+        sb.AppendLine();
+        foreach (var s in report.SplitResults)
+        {
+            sb.AppendLine($"### {Cell(s.OriginalProject)} → {Cell(s.MultiProject)} (net8.0) + {Cell(s.WindowsProject)} (net8.0-windows)");
+            sb.AppendLine($"- Ficheros portables: **{s.PortableFiles}** · Ficheros Windows: **{s.WindowsFiles}**  ");
+            sb.AppendLine($"- Generados en: `{Cell(s.OutputDir)}` (ver `SPLIT-NOTES-*.md`)  ");
+            sb.AppendLine();
+            if (s.CrossReferences.Count > 0)
+            {
+                sb.AppendLine("**Referencias cruzadas a resolver (introducir abstracción):**");
+                foreach (var r in s.CrossReferences.Take(20)) sb.AppendLine($"- {Cell(r)}");
+                if (s.CrossReferences.Count > 20) sb.AppendLine($"- … y {s.CrossReferences.Count - 20} más");
+                sb.AppendLine();
+            }
+            sb.AppendLine("**Acciones manuales pendientes:**");
+            foreach (var m in s.ManualNotes) sb.AppendLine($"- {Cell(m)}");
+            sb.AppendLine();
+        }
+    }
+
+    /// <summary>Apéndice con ejemplos de equivalencia Linux / compilación condicional por categoría.</summary>
+    private static void AppendCodeExamplesSection(StringBuilder sb, AnalysisReport report)
+    {
+        var cats = report.Assemblies.SelectMany(a => a.ConfirmedFindings()).Select(f => f.Categoria)
+            .Concat(report.SourceFindings.Select(f => f.Categoria))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var examples = CodeExamples.ForCategories(cats);
+        if (examples.Count == 0) return;
+
+        sb.AppendLine("## Equivalencias Linux y compilación condicional (ejemplos)");
+        sb.AppendLine();
+        sb.AppendLine("> Ejemplos de código para cada tipo de dependencia detectada: la equivalencia multiplataforma o cómo aislarla por SO (`OperatingSystem.IsWindows()` / `#if`).");
+        sb.AppendLine();
+        foreach (var e in examples)
+        {
+            sb.AppendLine($"### {e.Titulo}");
+            sb.AppendLine();
+            sb.AppendLine("```csharp");
+            sb.AppendLine(e.Codigo);
+            sb.AppendLine("```");
+            sb.AppendLine($"> {e.Nota}");
+            sb.AppendLine();
+        }
     }
 
     /// <summary>Métrica de impacto: clases y ficheros afectados por proyecto (además de las horas).</summary>
@@ -189,7 +244,7 @@ public sealed class MarkdownReportExporter : IReportExporter
     /// <summary>Nota de cabecera: explica la estrategia de estimación (en horas) y la columna N.</summary>
     private static void AppendEstimationNote(StringBuilder sb)
     {
-        sb.AppendLine("> **Cómo se estima (horas-persona).** Cada dependencia se estima a tres puntos: optimista (O), más probable (M) y pesimista (P); la **media = (O + 4*M + P) / 6** (PERT). El esfuerzo se cuenta **una vez por regla y ensamblado** (no por cada ocurrencia); a los **terceros** se les aplica un factor de incertidumbre; y se añade un bucket transversal de **Pruebas y CI**. El rango O-P es amplio a propósito (refleja la incertidumbre). La columna **N (ocurr.)** de las tablas es el **número de ocurrencias** de esa misma dependencia (regla + evidencia).");
+        sb.AppendLine("> **Cómo se estima (en horas-persona).** Cada dependencia se estima a tres puntos: **O = optimista**, **M = más probable**, **P = pesimista**. La **media = (O + 4·M + P) / 6** (método PERT) es el **valor esperado**, es decir, la **estimación más probable** a efectos de planificación. El esfuerzo se cuenta **una vez por regla y ensamblado** (no por cada ocurrencia); a los **terceros** se les aplica un factor de incertidumbre; y se añade un bucket transversal de **Pruebas y CI**. La columna **N (ocurr.)** de las tablas es el **número de ocurrencias** de esa misma dependencia (regla + evidencia).");
         sb.AppendLine();
     }
 

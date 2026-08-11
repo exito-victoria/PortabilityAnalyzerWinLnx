@@ -38,14 +38,16 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}"));
         b.Append(Para($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}"));
         b.Append(Para($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h"));
-        b.Append(Para("Cómo se estima (horas-persona): cada dependencia se estima a tres puntos O/M/P; media = (O + 4*M + P) / 6 (PERT). El esfuerzo se cuenta una vez por regla y ensamblado (no por ocurrencia); a los terceros se les aplica un factor de incertidumbre; se añade un bucket transversal de Pruebas y CI. El rango O-P es amplio a propósito. La columna N (ocurr.) es el número de ocurrencias de esa misma dependencia (regla + evidencia)."));
+        b.Append(Para("Cómo se estima (en horas-persona): cada dependencia se estima a tres puntos: O = optimista, M = más probable, P = pesimista. La media = (O + 4·M + P) / 6 (método PERT) es el valor esperado, es decir, la estimación más probable a efectos de planificación. El esfuerzo se cuenta una vez por regla y ensamblado (no por ocurrencia); a los terceros se les aplica un factor de incertidumbre; se añade un bucket de Pruebas y CI. La columna N (ocurr.) es el número de ocurrencias de esa dependencia (regla + evidencia)."));
         b.Append(Para(string.Empty));
 
         AppendBucketSummary(b, report.CostByBucket);
         AppendArchitectureSection(b, report);
+        AppendSplitSection(b, report);
         AppendThirdPartySection(b, report);
         AppendImpactSection(b, report);
         AppendSourceSection(b, report);
+        AppendCodeExamplesSection(b, report);
 
         // Pesos relativos de columna (se convierten a anchos que suman el ancho util de la pagina).
         //                              Regla Sev  N   Esf  Ubic Estr Evid Alt  Pasos
@@ -157,6 +159,60 @@ public sealed class WordReportExporter : IReportExporter
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             b.Append(Para($"{i + 1}. {plan.MigrationSteps[i]}"));
         b.Append(Para(string.Empty));
+    }
+
+    /// <summary>Scaffold de división de los proyectos con rol divisiblePorUI.</summary>
+    private static void AppendSplitSection(Body b, AnalysisReport report)
+    {
+        if (report.SplitResults.Count == 0) return;
+
+        b.Append(Para("División de proyectos (scaffold generado)", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Para los proyectos con rol divisiblePorUI se han generado dos proyectos en la carpeta de salida: una parte multiplataforma (net8.0) y otra Windows (net8.0-windows). Es un punto de partida: revisar las referencias cruzadas y las acciones pendientes."));
+        foreach (var s in report.SplitResults)
+        {
+            b.Append(Para($"{s.OriginalProject} -> {s.MultiProject} (net8.0) + {s.WindowsProject} (net8.0-windows)", bold: true, sizeHalfPt: 24));
+            b.Append(Para($"Ficheros portables: {s.PortableFiles} · Ficheros Windows: {s.WindowsFiles}. Generados en: {s.OutputDir} (ver SPLIT-NOTES-*.md)."));
+            if (s.CrossReferences.Count > 0)
+            {
+                b.Append(Para("Referencias cruzadas a resolver (introducir abstracción):", bold: true));
+                foreach (var r in s.CrossReferences.Take(20)) b.Append(Para($"- {r}"));
+            }
+            b.Append(Para("Acciones manuales pendientes:", bold: true));
+            foreach (var m in s.ManualNotes) b.Append(Para($"- {m}"));
+        }
+        b.Append(Para(string.Empty));
+    }
+
+    /// <summary>Apéndice con ejemplos de equivalencia Linux / compilación condicional por categoría.</summary>
+    private static void AppendCodeExamplesSection(Body b, AnalysisReport report)
+    {
+        var cats = report.Assemblies.SelectMany(a => a.ConfirmedFindings()).Select(f => f.Categoria)
+            .Concat(report.SourceFindings.Select(f => f.Categoria))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var examples = CodeExamples.ForCategories(cats);
+        if (examples.Count == 0) return;
+
+        b.Append(Para("Equivalencias Linux y compilación condicional (ejemplos)", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Ejemplos de código para cada tipo de dependencia detectada: la equivalencia multiplataforma o cómo aislarla por SO."));
+        foreach (var e in examples)
+        {
+            b.Append(Para(e.Titulo, bold: true, sizeHalfPt: 24));
+            foreach (var line in e.Codigo.Replace("\r", string.Empty).Split('\n'))
+                b.Append(CodeLine(line));
+            b.Append(Para(e.Nota));
+        }
+        b.Append(Para(string.Empty));
+    }
+
+    /// <summary>Línea de código en monoespaciado (Consolas), preservando la indentación.</summary>
+    private static Paragraph CodeLine(string text)
+    {
+        var runProps = new RunProperties(
+            new RunFonts { Ascii = "Consolas", HighAnsi = "Consolas" },
+            new FontSize { Val = "18" });
+        var run = new Run(runProps, new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        var pp = new ParagraphProperties(new SpacingBetweenLines { After = "0", Before = "0" });
+        return new Paragraph(pp, run);
     }
 
     /// <summary>Métrica de impacto: clases y ficheros afectados por proyecto.</summary>

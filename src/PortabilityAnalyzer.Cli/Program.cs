@@ -101,6 +101,25 @@ internal static class Program
                 }
             }
 
+            // Generar el scaffold de division para los proyectos con rol divisiblePorUI.
+            var splitResults = new List<SplitResult>();
+            if (!roles.IsEmpty && ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
+            {
+                var outputDir = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".";
+                foreach (var (pname, pdir) in new ProjectDiscovery().GetProjects(options.InputPath))
+                {
+                    if (roles.RoleOf(pname) != ProjectRole.DivisiblePorUI || !Directory.Exists(pdir)) continue;
+                    try
+                    {
+                        var r = new ProjectSplitter().Split(pname, pdir, sourceFindings, outputDir);
+                        splitResults.Add(r);
+                        Log.Information("Split de {Proj}: {Multi} ({P} ficheros) + {Win} ({W} ficheros) en {Dir}",
+                            pname, r.MultiProject, r.PortableFiles, r.WindowsProject, r.WindowsFiles, outputDir);
+                    }
+                    catch (Exception ex) { Log.Warning(ex, "No se pudo dividir {Proj}", pname); }
+                }
+            }
+
             var results = new List<AssemblyAnalysisResult>();
             foreach (var asmRef in assemblies)
                 results.Add(engine.AnalyzeAssembly(asmRef.Path, asmRef.IsThirdParty));
@@ -132,7 +151,8 @@ internal static class Program
                 SkippedCount = results.Count - analyzed.Count,
                 CostByBucket = costByBucket,
                 SourceFindings = sourceFindings,
-                Roles = roles
+                Roles = roles,
+                SplitResults = splitResults
             };
 
             // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico
