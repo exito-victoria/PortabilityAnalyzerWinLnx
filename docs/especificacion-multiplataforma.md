@@ -207,11 +207,17 @@ con trazabilidad completa, clasificación y esfuerzo. Conserva **cada ocurrencia
   migración** por pasos, con el esfuerzo total (incluidas Pruebas y CI) y el nº de bloqueantes.
 - **Fase 5 — Hecho (requisitos del cliente).** Ver §12. Hecho: análisis a nivel de **código fuente**
   (Roslyn) con segmento y corrección; **impacto por proyecto** (clases/ficheros afectados); cabecera
-  con la **estrategia de estimación** (en horas); columna **N** aclarada; título/lenguaje
-  **multiplataforma**; **roles de proyecto** (`--roles`) con API obligatoria, no modificables (su
-  esfuerzo no se imputa) y divisibles por UI; equivalente concreto en el paso de reemplazo; **bug de
-  tildes** corregido. **Pendiente**: investigación específica del soporte Linux de los paquetes de
-  ACRA/XMA/Safran (requiere sus DLLs/paquetes reales, disponibles en el análisis del cliente).
+  con la **estrategia de estimación** (en horas) con **siglas O/M/P** definidas y media = "la más
+  probable"; **recalibración del esfuerzo** (rango más estrecho: se mantiene O, M×0.7, P×0.5); columna
+  **N (ocurr.)** aclarada; título/lenguaje **multiplataforma**; **roles de proyecto** (`--roles`) con
+  API obligatoria (análisis de cambios, sin "convertir a API"), no modificables (su esfuerzo no se
+  imputa) y **divisibles por UI con generación física de dos proyectos** (`<Nombre>Multi/` net8.0 +
+  `<Nombre>/` net8.0-windows, por fichero, scaffold, clases parciales juntas, `SPLIT-NOTES`);
+  **apéndice de equivalencias Linux / compilación condicional** (`OperatingSystem.IsWindows()`,
+  `#if WINDOWS`) con fragmentos por categoría; **decompilación IL** de DLLs de terceros para detectar
+  llamadas al SO Windows; **bug de tildes** corregido. **Pendiente**: investigación específica del
+  soporte Linux de los paquetes de ACRA/XMA/Safran (requiere sus DLLs/paquetes reales, disponibles en
+  el análisis del cliente).
 
 ---
 
@@ -242,25 +248,40 @@ legacy** y el **ICD importer legacy**). "Multiplataforma general" (más allá de
 2. **Métrica de impacto (además de las horas).** Por paquete (proyecto/ensamblado): **recuento y lista
    de clases y ficheros afectados**, con desglose por **espacio de nombres**. Da idea del tamaño del
    cambio independientemente de las horas.
-3. **Cabecera del informe.** Incluir una **descripción concisa de la estrategia de estimación** (PERT
-   O/Media/P; factor de terceros; Pruebas y CI) y **aclarar explícitamente que las cifras son horas**.
-   El rango optimista–pesimista es ancho por naturaleza: explicarlo.
+3. **Cabecera del informe.** Incluir una **descripción concisa de la estrategia de estimación** y
+   **definir las siglas**: **O** = optimista, **M** = más probable, **P** = pesimista; la **media** PERT
+   `(O + 4·M + P)/6` es **la estimación más probable**. Se aclara **explícitamente que las cifras son
+   horas** (factor de terceros y bucket de Pruebas y CI incluidos). El rango O–P es ancho por naturaleza:
+   se explica.
+   - **Recalibración del esfuerzo (rango más estrecho).** Se **estrecha el rango sin subir la optimista**:
+     se **mantiene O**, se **baja la media** (M×0.7) y se **baja la pesimista** (P×0.5), con las guardas
+     `O ≤ M ≤ P`. Más adelante, si hace falta, se podría reducir el global (al menos un 25 %).
 4. **Columna `N`.** Aclarar su significado en el informe: **nº de ocurrencias agregadas** de la misma
    regla+evidencia (se muestra una fila por dependencia y `N` indica cuántas veces aparece).
 5. **Lenguaje multiplataforma.** Redactar en términos de **multiplataforma** (no solo el par
    Windows-Linux), manteniendo el foco urgente en Windows↔Linux vía API.
 6. **Roles de proyecto — fichero de configuración `--roles` (JSON).** Define el papel de cada proyecto
    por nombre. La recomendación de arquitectura y las métricas usan estos roles:
-   - **`obligatorioMultiplataforma`** (`ProgrammingManagerService`, `ProgrammingManagerLib`): hoy
-     **no son API**; deben **convertirse en una API multiplataforma**. Prioridad máxima; sus
+   - **`obligatorioMultiplataforma`** (`ProgrammingManagerService`, `ProgrammingManagerLib`): deben ser
+     **multiplataforma**. **Ya son API en otra rama**, así que el informe **no** dice "convertir a API";
+     da el **análisis de los cambios** necesarios para que sean multiplataforma. Prioridad máxima; sus
      bloqueantes son los críticos.
    - **`noModificables`** (`ACRA`, `XMA`, `Safran`): de terceros. Se **analizan** sus DLLs, pero **no
      podemos hacerlas multiplataforma nosotros** — es responsabilidad del **proveedor**; su esfuerzo
      **no se cuenta como nuestro**. Se indica si existe versión/soporte Linux.
-   - **`divisiblePorUI`** (`ToolsCommon`): es nuestra y hay que **dividirla**: extraer **todo lo que
-     depende de Windows** a un **proyecto nuevo** y dejar el resto **limpio/multiplataforma**. Al
-     analizarla, el informe **propone explícitamente esa separación** (qué va a la parte limpia y qué
-     a la parte Windows).
+   - **`divisiblePorUI`** (`ToolsCommon`): es nuestra y hay que **dividirla**. La herramienta **lee todas
+     las clases fuente y genera físicamente dos proyectos nuevos** en la carpeta de `--output`, cada uno
+     en su subcarpeta (sobrescribe si ya existen):
+     - **`<Nombre>Multi/`** — independiente, `net8.0`, **multiplataforma** (ficheros portables).
+     - **`<Nombre>/`** — `net8.0-windows` (ficheros que usan APIs de Windows), con `ProjectReference` al
+       proyecto `Multi`.
+     Detalle del generador: **granularidad por fichero** (un `.cs` va entero a Windows si usa alguna API
+     de Windows); **scaffold** (punto de partida a compilar y ajustar); en el propio código se **deja
+     claro con una cabecera y ejemplos**; se **copian las `PackageReference` necesarias**; se **mantienen
+     los namespaces originales**; las **clases parciales se mantienen juntas** (p. ej. `Form1.cs` +
+     `Form1.Designer.cs`). Lo no convertible y las **referencias cruzadas** (código portable que usa un
+     tipo que quedó en la parte Windows → introducir una interfaz/abstracción) se listan en
+     `SPLIT-NOTES-<Nombre>.md` y en el informe.
    Ejemplo de fichero:
    ```json
    {
@@ -273,6 +294,18 @@ legacy** y el **ICD importer legacy**). "Multiplataforma general" (más allá de
    debe hacer el proveedor). Aun así, analizar sus DLLs e **investigar si existe soporte/versión
    Linux** del paquete; el informe incluye la **restricción** y la **vía viable** (o su ausencia), y su
    esfuerzo **no se imputa** al total nuestro.
+   - **Decompilación / análisis de las DLLs de terceros (sin fuentes).** La herramienta **inspecciona
+     los ensamblados de terceros a nivel de IL** (Mono.Cecil) — no necesita el código fuente — y detecta
+     sus **llamadas al SO Windows**: **P/Invoke a DLLs nativas** (`kernel32`, `advapi32`, `ole32`,
+     `OraOps18.dll`…), **COM**, registro, etc. La sección **"Análisis de terceros (sin fuentes)"**
+     inventaría por cada DLL sus **dependencias nativas del SO** (clasificadas *sistema Windows* vs
+     *nativa de terceros*, con nº de sitios) y sugiere el reemplazo gestionado cuando existe
+     (p. ej. `Oracle.DataAccess` → `Oracle.ManagedDataAccess.Core`). Límite: al no haber fuentes, no se
+     muestra el *segmento de código*, pero sí **qué llaman** del SO.
+8. **Apéndice de equivalencias Linux y compilación condicional.** El informe incluye, por cada categoría
+   de hallazgo presente, **fragmentos de código** que muestran la **equivalencia multiplataforma** o
+   **cómo hacerlo condicional por SO** con `OperatingSystem.IsWindows()` y `#if WINDOWS` (Registro,
+   P/Invoke, Identidad/WindowsIdentity, Base de datos/Oracle, UI, Criptografía/DPAPI, EventLog, WMI).
 
 **Contrato de salida:** se **mantiene**; estos cambios **añaden** campos/secciones. La columna `N`
 (solo Markdown/Word) se **aclara**, no se elimina.
