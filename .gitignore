@@ -5,3 +5,6 @@ obj/
 
 # Configuracion local de Claude Code (permisos personales)
 .claude/settings.local.json
+
+# Especificacion / prompt de trabajo interno: solo local, no se sube a GitHub
+docs/especificacion-multiplataforma.md
