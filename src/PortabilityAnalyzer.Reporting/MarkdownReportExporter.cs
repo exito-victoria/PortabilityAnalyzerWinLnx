@@ -228,16 +228,30 @@ public sealed class MarkdownReportExporter : IReportExporter
 
             if (p.NativeDeps.Count > 0)
             {
+                sb.AppendLine("**Dependencias nativas del SO (P/Invoke):**");
+                sb.AppendLine();
                 sb.AppendLine("| DLL nativa | Sitios P/Invoke | Tipo |");
                 sb.AppendLine("|------------|-----------------|------|");
                 foreach (var d in p.NativeDeps)
                     sb.AppendLine($"| {Cell(d.Dll)} | {d.Sites} | {ThirdPartyAnalysis.DependencyKind(d)} |");
+                sb.AppendLine();
             }
             else
             {
                 sb.AppendLine("Sin dependencias nativas P/Invoke detectadas (revisar referencias gestionadas).");
+                sb.AppendLine();
             }
-            sb.AppendLine();
+
+            if (p.WindowsApis.Count > 0)
+            {
+                sb.AppendLine("**APIs Windows gestionadas (no P/Invoke):**");
+                sb.AppendLine();
+                sb.AppendLine("| Categoría | API / tipo Windows | Sitios | Alternativa Linux / multiplataforma |");
+                sb.AppendLine("|-----------|--------------------|--------|-------------------------------------|");
+                foreach (var a in p.WindowsApis)
+                    sb.AppendLine($"| {Cell(a.Categoria)} | {Cell(a.Api)} | {a.Sites} | {Cell(a.AlternativaLinux)} |");
+                sb.AppendLine();
+            }
         }
     }
 

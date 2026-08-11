@@ -5,12 +5,18 @@ namespace PortabilityAnalyzer.Reporting;
 /// <summary>Una DLL nativa de la que depende (via P/Invoke) un ensamblado de terceros.</summary>
 public sealed record NativeDependency(string Dll, int Sites, bool IsWindowsSystem);
 
+/// <summary>Una API Windows GESTIONADA (no P/Invoke) que llama un ensamblado de terceros: el tipo/atributo
+/// concreto de .NET dependiente de Windows (p. ej. RegistryKey, WindowsIdentity, EventLog), su categoria,
+/// el nº de sitios de llamada y la alternativa multiplataforma.</summary>
+public sealed record WindowsManagedApi(string Categoria, string Api, int Sites, string AlternativaLinux);
+
 /// <summary>Perfil de dependencias del SO de un ensamblado de terceros (sin fuentes).</summary>
 public sealed record ThirdPartyProfile(
     string Assembly,
     Severity MaxSeverity,
     bool HasBlocker,
     IReadOnlyList<NativeDependency> NativeDeps,
+    IReadOnlyList<WindowsManagedApi> WindowsApis,
     int WindowsApiRules,
     string? SuggestedReplacement);
 
@@ -58,7 +64,19 @@ public static class ThirdPartyAnalysis
                 .OrderByDescending(d => d.Sites)
                 .ToList();
 
-            // APIs/referencias Windows gestionadas (no P/Invoke) detectadas.
+            // APIs Windows GESTIONADAS (no P/Invoke) concretas: se agrupan por la API/tipo dependiente de
+            // Windows (Evidencia; si falta, el tipo o la regla), con su categoria, nº de sitios y alternativa.
+            var winApis = asm.ConfirmedFindings()
+                .Where(f => !string.Equals(f.Categoria, "PInvoke", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(f => (f.Categoria, Api: ApiName(f)))
+                .Select(g => new WindowsManagedApi(
+                    g.Key.Categoria,
+                    g.Key.Api,
+                    g.Select(f => (f.Type, f.Method)).Distinct().Count(),
+                    g.Select(f => f.AlternativaLinux).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)) ?? string.Empty))
+                .OrderBy(a => a.Categoria).ThenByDescending(a => a.Sites)
+                .ToList();
+
             var winApiRules = asm.ConfirmedFindings()
                 .Where(f => !string.Equals(f.Categoria, "PInvoke", StringComparison.OrdinalIgnoreCase))
                 .Select(f => f.RuleId)
@@ -68,7 +86,7 @@ public static class ThirdPartyAnalysis
             KnownReplacements.TryGetValue(asm.Classification.Name, out var replacement);
 
             profiles.Add(new ThirdPartyProfile(
-                asm.Classification.Name, asm.MaxSeverity, asm.HasBlocker, native, winApiRules, replacement));
+                asm.Classification.Name, asm.MaxSeverity, asm.HasBlocker, native, winApis, winApiRules, replacement));
         }
 
         return profiles.OrderByDescending(p => p.MaxSeverity).ThenByDescending(p => p.NativeDeps.Count).ToList();
@@ -76,6 +94,15 @@ public static class ThirdPartyAnalysis
 
     public static string DependencyKind(NativeDependency d) =>
         d.IsWindowsSystem ? "Sistema Windows" : "Nativa de terceros (verificar .so en Linux)";
+
+    /// <summary>Nombre concreto de la API/tipo Windows del hallazgo: prioriza la evidencia (tipo, atributo o
+    /// API detectada); si falta, cae al tipo declarante y por ultimo a la regla.</summary>
+    private static string ApiName(Finding f)
+    {
+        if (!string.IsNullOrWhiteSpace(f.Evidencia)) return f.Evidencia!.Trim();
+        if (!string.IsNullOrWhiteSpace(f.Type)) return f.Type!.Trim();
+        return f.RuleId;
+    }
 
     private static string NormalizeDll(string s)
     {

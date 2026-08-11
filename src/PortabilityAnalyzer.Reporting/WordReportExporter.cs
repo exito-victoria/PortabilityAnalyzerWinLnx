@@ -280,6 +280,7 @@ public sealed class WordReportExporter : IReportExporter
 
             if (p.NativeDeps.Count > 0)
             {
+                b.Append(Para("Dependencias nativas del SO (P/Invoke):", bold: true));
                 b.Append(BuildTable(
                     new[] { "DLL nativa", "Sitios P/Invoke", "Tipo" },
                     new[] { 3.0, 1.5, 3.5 },
@@ -288,6 +289,15 @@ public sealed class WordReportExporter : IReportExporter
             else
             {
                 b.Append(Para("Sin dependencias nativas P/Invoke detectadas (revisar referencias gestionadas)."));
+            }
+
+            if (p.WindowsApis.Count > 0)
+            {
+                b.Append(Para("APIs Windows gestionadas (no P/Invoke):", bold: true));
+                b.Append(BuildTable(
+                    new[] { "Categoría", "API / tipo Windows", "Sitios", "Alternativa Linux / multiplataforma" },
+                    new[] { 2.0, 3.0, 1.0, 4.0 },
+                    p.WindowsApis.Select(a => new[] { a.Categoria, a.Api, a.Sites.ToString(), a.AlternativaLinux })));
             }
         }
         b.Append(Para(string.Empty));
