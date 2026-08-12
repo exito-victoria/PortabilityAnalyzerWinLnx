@@ -111,14 +111,15 @@ internal static class Program
                 }
             }
 
-            // Generar el scaffold de division para los proyectos con rol divisiblePorUI.
+            // Generar el scaffold de division (Windows/Multi) para los proyectos separables:
+            // divisiblePorUI, obligatorioMultiplataforma y los listados en "separables".
             var splitResults = new List<SplitResult>();
             if (!roles.IsEmpty && ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
             {
                 var outputDir = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".";
                 foreach (var (pname, pdir) in new ProjectDiscovery().GetProjects(options.InputPath))
                 {
-                    if (roles.RoleOf(pname) != ProjectRole.DivisiblePorUI || !Directory.Exists(pdir)) continue;
+                    if (!roles.IsSeparable(pname) || !Directory.Exists(pdir)) continue;
                     try
                     {
                         var r = new ProjectSplitter().Split(pname, pdir, sourceFindings, outputDir);

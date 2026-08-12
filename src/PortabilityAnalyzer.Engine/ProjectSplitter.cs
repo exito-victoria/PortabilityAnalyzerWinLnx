@@ -33,25 +33,43 @@ public sealed class ProjectSplitter
             .Select(f => f.File)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var allCs = Directory.EnumerateFiles(projectDir, "*.cs", SearchOption.AllDirectories)
+        // Todos los ficheros del proyecto (codigo y CONTENIDO: xaml/resx/imagenes/config...), excluyendo
+        // obj/bin y el propio .csproj (se regenera). Antes solo se copiaban los .cs, con lo que un WPF
+        // quedaba roto (el .xaml.cs sin su .xaml). Ahora se copia y clasifica tambien el contenido.
+        var allFiles = Directory.EnumerateFiles(projectDir, "*", SearchOption.AllDirectories)
             .Where(p => !IsObjBin(p, projectDir))
+            .Where(p => !p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .Where(p => !IsVsJunk(p))
             .Select(p => (Abs: p, Rel: System.IO.Path.GetRelativePath(projectDir, p)))
             .ToList();
+
+        var codeFiles = allFiles.Where(f => f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+        var contentFiles = allFiles.Where(f => !f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // El code-behind de un XAML (*.xaml.cs) va SIEMPRE a Windows (WPF): se anade a la semilla.
+        foreach (var f in codeFiles)
+            if (f.Rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+                winRelFiles.Add(f.Rel);
 
         // Propaga la marca Windows por clases PARCIALES (mismo tipo en varios ficheros) y por HERENCIA
         // (una clase que deriva de un tipo que quedo en Windows tambien va a Windows). Asi, p. ej., los
         // ViewModels que heredan de una base que usa System.Windows/Dispatcher no se quedan en Multi.
-        var winExpanded = ExpandWindowsSet(allCs, winRelFiles);
+        var winExpanded = ExpandWindowsSet(codeFiles, winRelFiles);
 
-        var winFiles = allCs.Where(f => winExpanded.Contains(f.Rel)).ToList();
-        var portableFiles = allCs.Where(f => !winExpanded.Contains(f.Rel)).ToList();
+        var winFiles = codeFiles.Where(f => winExpanded.Contains(f.Rel)).ToList();
+        var portableFiles = codeFiles.Where(f => !winExpanded.Contains(f.Rel)).ToList();
+
+        // Clasificar el contenido: el XAML es Windows; el resto sigue al .cs de su mismo nombre (p. ej.
+        // Form1.resx con Form1.cs) y, si es huerfano, se decide por extension (UI -> Windows; resto -> Multi).
+        var (winContent, multiContent) = ClassifyContent(contentFiles, winFiles, portableFiles);
+        var hasXaml = winContent.Any(f => f.Rel.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase));
 
         RecreateDir(multiDir);
         RecreateDir(winDir);
 
         // El proyecto Multi tiene su PROPIO namespace raiz (<root> -> <root>Multi), como pidio el cliente
         // (p. ej. ToolsCommon -> ToolsCommonMulti). El proyecto Windows conserva el namespace original.
-        var rootNs = DetectRootNamespace(allCs);
+        var rootNs = DetectRootNamespace(codeFiles);
         var multiRootNs = rootNs is null ? null : rootNs + "Multi";
         Func<string, string>? multiTransform =
             (rootNs is null || multiRootNs is null) ? null : c => RebaseNamespace(c, rootNs, multiRootNs);
@@ -65,11 +83,26 @@ public sealed class ProjectSplitter
                 $"[SCAFFOLD generado] Proyecto {winName} (net8.0-windows). Revisar SPLIT-NOTES-{baseName}.md.",
                 null);
 
-        var (packages, useWpf, useWinForms) = ReadCsproj(projectDir);
+        // El contenido (xaml/resx/recursos) se copia VERBATIM (sin cabecera // ni rebase de namespace).
+        foreach (var f in multiContent) CopyRaw(f.Abs, System.IO.Path.Combine(multiDir, f.Rel));
+        foreach (var f in winContent) CopyRaw(f.Abs, System.IO.Path.Combine(winDir, f.Rel));
 
-        WriteCsproj(System.IO.Path.Combine(multiDir, multiName + ".csproj"), "net8.0", packages, false, false, null);
+        var (packages, useWpf, useWinForms, outputType) = ReadCsproj(projectDir);
+        if (hasXaml) useWpf = true; // si hay XAML en la parte Windows, el proyecto es WPF.
+
+        // El proyecto Windows conserva el OutputType original (exe/servicio); si tiene App.xaml
+        // (ApplicationDefinition de WPF) debe ser ejecutable (WinExe), no biblioteca. El Multi es biblioteca.
+        var hasAppXaml = winContent.Any(f => System.IO.Path.GetFileName(f.Rel).Equals("App.xaml", StringComparison.OrdinalIgnoreCase));
+        var winOutputType = hasAppXaml && !(outputType?.Contains("Exe", StringComparison.OrdinalIgnoreCase) ?? false)
+            ? "WinExe" : outputType;
+
+        var multiHasAsmInfo = portableFiles.Any(f => IsAssemblyInfo(f.Rel));
+        var winHasAsmInfo = winFiles.Any(f => IsAssemblyInfo(f.Rel));
+
+        WriteCsproj(System.IO.Path.Combine(multiDir, multiName + ".csproj"), "net8.0", packages, false, false, null,
+            outputType: null, generateAssemblyInfo: !multiHasAsmInfo);
         WriteCsproj(System.IO.Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", packages, useWpf, useWinForms,
-            $"..\\{multiName}\\{multiName}.csproj");
+            $"..\\{multiName}\\{multiName}.csproj", winOutputType, generateAssemblyInfo: !winHasAsmInfo);
 
         // Para que el codigo Windows resuelva por nombre simple los tipos que se movieron al Multi (ahora
         // en <root>Multi...), se genera un GlobalUsings.cs en el proyecto Windows con esos namespaces.
@@ -85,6 +118,10 @@ public sealed class ProjectSplitter
             manual.Add($"Namespace separado: el proyecto {multiName} usa el namespace '{multiRootNs}' (el original '{rootNs}' se conserva en {winName}). Se ha generado GlobalUsings.cs en {winName} para resolver los tipos movidos; revisar referencias totalmente cualificadas que sigan usando '{rootNs}.'.");
         if (crossRefs.Count > 0)
             manual.Add($"{crossRefs.Count} referencia(s) de codigo portable a tipos que quedaron en {winName} (Windows): introducir una interfaz/abstraccion en {multiName} e implementarla en {winName}.");
+        if (winContent.Count > 0 || multiContent.Count > 0)
+            manual.Add($"Contenido copiado (xaml/resx/recursos): {winContent.Count} a {winName} y {multiContent.Count} a {multiName}. El XAML y su code-behind van juntos a {winName}; revisar los recursos huerfanos clasificados por extension.");
+        if (winContent.Concat(multiContent).Any(f => f.Rel.EndsWith(".settings", StringComparison.OrdinalIgnoreCase)))
+            manual.Add("Se detecto Properties/Settings (proyecto clasico): el Settings.Designer.cs requiere el paquete System.Configuration.ConfigurationManager; anadirlo o migrar la configuracion a IConfiguration (appsettings.json).");
         manual.Add($"Revisar las PackageReference de {multiName}: eliminar las que sean solo-Windows.");
         manual.Add("El scaffold es un punto de partida: compilar cada proyecto y resolver los errores de referencias que queden.");
 
@@ -124,6 +161,69 @@ public sealed class ProjectSplitter
         if (transform is not null) content = transform(content);
         File.WriteAllText(target, $"// {header}{Environment.NewLine}{content}");
     }
+
+    /// <summary>Copia un fichero de contenido (xaml/resx/imagen/config...) tal cual, sin modificarlo.</summary>
+    private static void CopyRaw(string source, string target)
+    {
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);
+        File.Copy(source, target, overwrite: true);
+    }
+
+    /// <summary>Reparte los ficheros de contenido entre Windows y Multi: el XAML es siempre Windows; el
+    /// resto sigue al codigo de su mismo nombre (Form1.resx con Form1.cs) y, si es huerfano, por extension
+    /// (recursos de UI -> Windows; el resto -> Multi).</summary>
+    private static (List<(string Abs, string Rel)> Win, List<(string Abs, string Rel)> Multi) ClassifyContent(
+        List<(string Abs, string Rel)> content,
+        List<(string Abs, string Rel)> winCode,
+        List<(string Abs, string Rel)> portableCode)
+    {
+        var winStems = winCode.Select(f => StemKey(f.Rel)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var portStems = portableCode.Select(f => StemKey(f.Rel)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var win = new List<(string, string)>();
+        var multi = new List<(string, string)>();
+        foreach (var f in content)
+        {
+            if (f.Rel.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)) { win.Add(f); continue; }
+            var stem = StemKey(f.Rel);
+            if (winStems.Contains(stem)) win.Add(f);
+            else if (portStems.Contains(stem)) multi.Add(f);
+            else if (IsWindowsContent(f.Rel)) win.Add(f);
+            else multi.Add(f);
+        }
+        return (win, multi);
+    }
+
+    /// <summary>Clave de agrupacion por carpeta + nombre hasta el primer punto: Form1.cs, Form1.Designer.cs
+    /// y Form1.resx comparten clave "dir|Form1"; MainWindow.xaml.cs -> "dir|MainWindow".</summary>
+    private static string StemKey(string rel)
+    {
+        var dir = System.IO.Path.GetDirectoryName(rel) ?? string.Empty;
+        var name = System.IO.Path.GetFileName(rel);
+        var dot = name.IndexOf('.');
+        var stem = dot > 0 ? name[..dot] : name;
+        return dir + "|" + stem;
+    }
+
+    private static bool IsWindowsContent(string rel)
+    {
+        var ext = System.IO.Path.GetExtension(rel).ToLowerInvariant();
+        return ext is ".xaml" or ".resx" or ".settings" or ".resources" or ".baml" or ".config"
+            or ".png" or ".jpg" or ".jpeg" or ".ico" or ".bmp" or ".gif" or ".cur";
+    }
+
+    /// <summary>Artefactos de Visual Studio/usuario que no deben copiarse al scaffold.</summary>
+    private static bool IsVsJunk(string path)
+    {
+        var name = System.IO.Path.GetFileName(path);
+        return name.EndsWith(".user", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".dtbcache.json", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".suo", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>True si el fichero es un AssemblyInfo.cs clasico (choca con GenerateAssemblyInfo del SDK).</summary>
+    private static bool IsAssemblyInfo(string rel) =>
+        System.IO.Path.GetFileName(rel).Equals("AssemblyInfo.cs", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Namespace raiz mas frecuente entre los ficheros (primer segmento). Base para el rebase del Multi.</summary>
     private static string? DetectRootNamespace(List<(string Abs, string Rel)> allCs)
@@ -191,10 +291,10 @@ public sealed class ProjectSplitter
         File.WriteAllText(path, sb.ToString());
     }
 
-    private static (IReadOnlyList<string> Packages, bool UseWpf, bool UseWinForms) ReadCsproj(string projectDir)
+    private static (IReadOnlyList<string> Packages, bool UseWpf, bool UseWinForms, string? OutputType) ReadCsproj(string projectDir)
     {
         var csproj = Directory.GetFiles(projectDir, "*.csproj").FirstOrDefault();
-        if (csproj is null) return (Array.Empty<string>(), false, false);
+        if (csproj is null) return (Array.Empty<string>(), false, false, null);
 
         var text = File.ReadAllText(csproj);
         var packages = PackageRef.Matches(text).Select(m => m.Value.Trim()).Distinct().ToList();
@@ -202,17 +302,22 @@ public sealed class ProjectSplitter
                      text.Contains("PresentationFramework", StringComparison.OrdinalIgnoreCase);
         var useWinForms = Regex.IsMatch(text, "<UseWindowsForms>\\s*true", RegexOptions.IgnoreCase) ||
                           text.Contains("System.Windows.Forms", StringComparison.OrdinalIgnoreCase);
-        return (packages, useWpf, useWinForms);
+        var outputType = Regex.Match(text, "<OutputType>\\s*([^<]+?)\\s*</OutputType>", RegexOptions.IgnoreCase) is { Success: true } m
+            ? m.Groups[1].Value.Trim() : null;
+        return (packages, useWpf, useWinForms, outputType);
     }
 
-    private static void WriteCsproj(string path, string tfm, IReadOnlyList<string> packages, bool useWpf, bool useWinForms, string? projectReference)
+    private static void WriteCsproj(string path, string tfm, IReadOnlyList<string> packages, bool useWpf, bool useWinForms, string? projectReference, string? outputType = null, bool generateAssemblyInfo = true)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<Project Sdk=\"Microsoft.NET.Sdk\">");
         sb.AppendLine("  <PropertyGroup>");
         sb.AppendLine($"    <TargetFramework>{tfm}</TargetFramework>");
+        if (!string.IsNullOrWhiteSpace(outputType)) sb.AppendLine($"    <OutputType>{outputType}</OutputType>");
         sb.AppendLine("    <ImplicitUsings>enable</ImplicitUsings>");
         sb.AppendLine("    <Nullable>enable</Nullable>");
+        // Si se copia un AssemblyInfo.cs clasico, evitar que el SDK autogenere atributos (evita CS0579).
+        if (!generateAssemblyInfo) sb.AppendLine("    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>");
         if (useWpf) sb.AppendLine("    <UseWPF>true</UseWPF>");
         if (useWinForms) sb.AppendLine("    <UseWindowsForms>true</UseWindowsForms>");
         sb.AppendLine("  </PropertyGroup>");

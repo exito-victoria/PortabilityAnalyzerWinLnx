@@ -1,5 +1,5 @@
 {
-  "_comentario": "Roles de proyecto para la recomendacion multiplataforma. Se pasa con --roles. La coincidencia por nombre es flexible (sin distinguir mayusculas, por subcadena).",
+  "_comentario": "Roles de proyecto para la recomendacion multiplataforma. Se pasa con --roles. La coincidencia por nombre es flexible (sin distinguir mayusculas, por subcadena). Se generan proyectos separados Windows/Multi para: divisiblePorUI, obligatorioMultiplataforma y los listados en 'separables'.",
   "obligatorioMultiplataforma": [
     "ProgrammingManagerService",
     "ProgrammingManagerServiceLib"
@@ -11,5 +11,6 @@
   ],
   "divisiblePorUI": [
     "ToolsCommon"
-  ]
+  ],
+  "separables": []
 }
