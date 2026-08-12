@@ -32,6 +32,8 @@ public sealed class WordReportExporter : IReportExporter
         using var word = WordprocessingDocument.Create(outputPath, WordprocessingDocumentType.Document);
         var mainPart = word.AddMainDocumentPart();
         mainPart.Document = new Document();
+        AddStyleDefinitions(mainPart);   // estilos Titulo / Encabezado 1-3 (para el Panel de navegacion y el TOC).
+        AddUpdateFieldsOnOpen(mainPart);  // que Word actualice la Tabla de contenido al abrir el documento.
         var b = mainPart.Document.AppendChild(new Body());
 
         b.Append(Para("Informe de análisis multiplataforma (.NET 8) - portabilidad de Windows", bold: true, sizeHalfPt: 36));
@@ -40,6 +42,11 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h"));
         b.Append(Para("Cómo se estima (en horas-persona): cada dependencia se estima a tres puntos: O = optimista, M = más probable, P = pesimista. La media = (O + 4·M + P) / 6 (método PERT) es el valor esperado, es decir, la estimación más probable a efectos de planificación. El esfuerzo se cuenta una vez por regla y ensamblado (no por ocurrencia); a los terceros se les aplica un factor de incertidumbre; se añade un bucket de Pruebas y CI. La columna N (ocurr.) es el número de ocurrencias de esa dependencia (regla + evidencia)."));
         b.Append(Para(string.Empty));
+
+        // Tabla de contenido: se rellena con los titulos (estilos Encabezado 1/2) al abrir/actualizar en Word.
+        b.Append(Para("Tabla de contenido", bold: true, sizeHalfPt: 30));
+        b.Append(BuildTocField());
+        b.Append(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
 
         AppendBuildOrderSection(b, report);
         AppendBucketSummary(b, report.CostByBucket);
@@ -386,6 +393,60 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para(string.Empty));
     }
 
+    /// <summary>Define los estilos con nombre Titulo / Encabezado 1-3 (con nivel de esquema) para que Word
+    /// los reconozca en el Panel de navegacion y al generar la Tabla de contenido.</summary>
+    private static void AddStyleDefinitions(MainDocumentPart mainPart)
+    {
+        var part = mainPart.AddNewPart<StyleDefinitionsPart>();
+        part.Styles = new Styles(
+            HeadingStyle("Title", "Title", null, 40, "1F3864"),
+            HeadingStyle("Heading1", "heading 1", 0, 32, "2F5496"),
+            HeadingStyle("Heading2", "heading 2", 1, 28, "2F5496"),
+            HeadingStyle("Heading3", "heading 3", 2, 24, "1F3864"));
+    }
+
+    private static Style HeadingStyle(string styleId, string name, int? outlineLevel, int sizeHalfPt, string colorHex)
+    {
+        var pPr = new StyleParagraphProperties(
+            new KeepNext(), new KeepLines(),
+            new SpacingBetweenLines { Before = "240", After = "60" });
+        if (outlineLevel is int lvl) pPr.Append(new OutlineLevel { Val = lvl });
+
+        return new Style(
+            new StyleName { Val = name },
+            new BasedOn { Val = "Normal" },
+            new NextParagraphStyle { Val = "Normal" },
+            new UIPriority { Val = 9 },
+            new PrimaryStyle(),
+            pPr,
+            new StyleRunProperties(
+                new Bold(),
+                new Color { Val = colorHex },
+                new FontSize { Val = sizeHalfPt.ToString() }))
+        {
+            Type = StyleValues.Paragraph,
+            StyleId = styleId
+        };
+    }
+
+    /// <summary>Hace que Word actualice los campos (incluida la Tabla de contenido) al abrir el documento.</summary>
+    private static void AddUpdateFieldsOnOpen(MainDocumentPart mainPart)
+    {
+        var settingsPart = mainPart.AddNewPart<DocumentSettingsPart>();
+        settingsPart.Settings = new Settings(new UpdateFieldsOnOpen { Val = true });
+    }
+
+    /// <summary>Parrafo con el campo TOC (niveles 1-3, hipervinculos). Word lo rellena al abrir/actualizar.</summary>
+    private static Paragraph BuildTocField()
+    {
+        return new Paragraph(
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Begin }),
+            new Run(new FieldCode(" TOC \\o \"1-3\" \\h \\z \\u ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }),
+            new Run(new Text("Tabla de contenido: clic derecho > Actualizar campos (F9) para rellenarla.") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+    }
+
     private static Paragraph Para(string text, bool bold = false, int? sizeHalfPt = null)
     {
         var runProps = new RunProperties();
@@ -395,8 +456,26 @@ public sealed class WordReportExporter : IReportExporter
         var run = new Run();
         if (runProps.HasChildren) run.Append(runProps);
         run.Append(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
-        return new Paragraph(run);
+
+        var para = new Paragraph();
+        // Los titulos (negrita + tamano de titulo) se asocian a un estilo con nombre (Titulo/Encabezado 1/2),
+        // para que Word los reconozca en el Panel de navegacion y al generar la Tabla de contenido.
+        var styleId = HeadingStyleFor(bold, sizeHalfPt);
+        if (styleId is not null)
+            para.Append(new ParagraphProperties(new ParagraphStyleId { Val = styleId }));
+        para.Append(run);
+        return para;
     }
+
+    /// <summary>Mapea (negrita, tamano) al estilo de titulo de Word: 36->Titulo, 28->Encabezado 1, 24->Encabezado 2.</summary>
+    private static string? HeadingStyleFor(bool bold, int? sizeHalfPt) =>
+        (bold, sizeHalfPt) switch
+        {
+            (true, 36) => "Title",
+            (true, 28) => "Heading1",
+            (true, 24) => "Heading2",
+            _ => null
+        };
 
     /// <summary>Parrafo de celda: fuente reducida, sin espaciado extra, para que la tabla quepa en la pagina.</summary>
     private static Paragraph CellPara(string text, bool bold)
