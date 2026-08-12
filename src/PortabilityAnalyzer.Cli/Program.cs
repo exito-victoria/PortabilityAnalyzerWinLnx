@@ -111,21 +111,29 @@ internal static class Program
                 }
             }
 
+            // Carpeta de salida de los informes: crearla si no existe (p. ej. si el usuario la borro para
+            // regenerarla). Sin esto, la escritura del informe fallaria con DirectoryNotFoundException.
+            var reportDir = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".";
+            Directory.CreateDirectory(reportDir);
+
             // Generar el scaffold de division (Windows/Multi) para los proyectos separables:
-            // divisiblePorUI, obligatorioMultiplataforma y los listados en "separables".
+            // divisiblePorUI, obligatorioMultiplataforma y los listados en "separables". Los proyectos
+            // generados se escriben en una SUBCARPETA dedicada ('proyectos-separados') para que NUNCA
+            // colisionen con las carpetas de codigo originales (evita borrar el codigo fuente del usuario).
             var splitResults = new List<SplitResult>();
             if (!roles.IsEmpty && ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
             {
-                var outputDir = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".";
+                var splitBaseDir = Path.Combine(reportDir, "proyectos-separados");
+                Directory.CreateDirectory(splitBaseDir);
                 foreach (var (pname, pdir) in new ProjectDiscovery().GetProjects(options.InputPath))
                 {
                     if (!roles.IsSeparable(pname) || !Directory.Exists(pdir)) continue;
                     try
                     {
-                        var r = new ProjectSplitter().Split(pname, pdir, sourceFindings, outputDir);
+                        var r = new ProjectSplitter().Split(pname, pdir, sourceFindings, splitBaseDir);
                         splitResults.Add(r);
                         Log.Information("Split de {Proj}: {Multi} ({P} ficheros) + {Win} ({W} ficheros) en {Dir}",
-                            pname, r.MultiProject, r.PortableFiles, r.WindowsProject, r.WindowsFiles, outputDir);
+                            pname, r.MultiProject, r.PortableFiles, r.WindowsProject, r.WindowsFiles, splitBaseDir);
                     }
                     catch (Exception ex) { Log.Warning(ex, "No se pudo dividir {Proj}", pname); }
                 }
@@ -186,11 +194,10 @@ internal static class Program
             // Informe EJECUTIVO (solo con --executive): InformeEjec_<proyecto>.docx en la carpeta del informe general.
             if (options.Executive)
             {
-                var dir = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".";
                 var projName = ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)
                     ? Path.GetFileNameWithoutExtension(options.InputPath)
                     : Path.GetFileNameWithoutExtension(options.OutputPath);
-                var execPath = Path.Combine(dir, $"InformeEjec_{projName}.docx");
+                var execPath = Path.Combine(reportDir, $"InformeEjec_{projName}.docx");
                 new ExecutiveWordExporter(projName).Export(report, execPath);
                 Log.Information("Informe ejecutivo escrito en {Path}", execPath);
             }

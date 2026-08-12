@@ -64,6 +64,13 @@ public sealed class ProjectSplitter
         var (winContent, multiContent) = ClassifyContent(contentFiles, winFiles, portableFiles);
         var hasXaml = winContent.Any(f => f.Rel.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase));
 
+        // SALVAGUARDA: nunca recrear (borrar) una carpeta de salida que colisione con el proyecto original
+        // (evita perder el codigo fuente si --output apunta dentro de la solucion).
+        if (PathConflictsWith(multiDir, projectDir) || PathConflictsWith(winDir, projectDir))
+            throw new InvalidOperationException(
+                $"La carpeta de salida del split colisiona con el proyecto original '{projectDir}'. " +
+                "Elige un --output fuera de la carpeta de la solucion para no arriesgar el codigo fuente.");
+
         RecreateDir(multiDir);
         RecreateDir(winDir);
 
@@ -152,6 +159,18 @@ public sealed class ProjectSplitter
     {
         if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         Directory.CreateDirectory(dir);
+    }
+
+    /// <summary>True si <paramref name="target"/> es la misma carpeta que <paramref name="other"/>, o una
+    /// esta contenida en la otra. Se usa para no borrar/escribir sobre el codigo fuente original.</summary>
+    private static bool PathConflictsWith(string target, string other)
+    {
+        var t = System.IO.Path.GetFullPath(target).TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+        var o = System.IO.Path.GetFullPath(other).TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+        if (string.Equals(t, o, StringComparison.OrdinalIgnoreCase)) return true;
+        var sep = System.IO.Path.DirectorySeparatorChar;
+        return t.StartsWith(o + sep, StringComparison.OrdinalIgnoreCase)
+            || o.StartsWith(t + sep, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void CopyWithHeader(string source, string target, string header, Func<string, string>? transform)
