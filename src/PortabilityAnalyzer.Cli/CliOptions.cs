@@ -31,10 +31,15 @@ internal sealed class CliOptions
     /// <summary>Fraccion del esfuerzo de desarrollo que se imputa al bucket de Pruebas y CI en ambos SO.</summary>
     public double TestingFactor { get; init; } = 0.25;
 
+    /// <summary>Si es true (flag <c>--executive</c>), ademas se genera el informe EJECUTIVO
+    /// <c>InformeEjec_&lt;nombreproyecto&gt;.docx</c> en la misma carpeta del informe general.</summary>
+    public bool Executive { get; init; }
+
     public static CliOptions? Parse(string[] args)
     {
         string? input = null, rules = null, schema = null, output = null, format = null, rolesPath = null;
         bool assumeThirdParty = false;
+        bool executive = false;
         double thirdPartyFactor = 1.5;
         double testingFactor = 0.25;
 
@@ -52,6 +57,10 @@ internal sealed class CliOptions
 
                 case "--assume-third-party":
                     assumeThirdParty = true;
+                    break;
+
+                case "--executive":
+                    executive = true;
                     break;
 
                 case "--third-party-factor":
@@ -87,7 +96,8 @@ internal sealed class CliOptions
             Formats = ParseFormats(format),
             AssumeThirdParty = assumeThirdParty,
             ThirdPartyFactor = thirdPartyFactor,
-            TestingFactor = testingFactor
+            TestingFactor = testingFactor,
+            Executive = executive
         };
     }
 
@@ -130,6 +140,7 @@ internal sealed class CliOptions
             "  --format                  json (por defecto) | markdown | word | all, o lista separada por comas" + Environment.NewLine +
             "                            (p. ej. 'word,markdown' -> una ejecucion, dos informes; la extension" + Environment.NewLine +
             "                            de cada uno se deriva de --output cuando se piden varios)." + Environment.NewLine +
+            "  --executive               Genera ademas el informe ejecutivo InformeEjec_<proyecto>.docx (resumen para el cliente)." + Environment.NewLine +
             "  --assume-third-party      Aplica un factor de incertidumbre (x1.5 por defecto) a todos los ensamblados." + Environment.NewLine +
             "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party." + Environment.NewLine +
             "  --testing-factor <n>      Fraccion del esfuerzo de desarrollo imputada a Pruebas y CI (por defecto 0.25).");

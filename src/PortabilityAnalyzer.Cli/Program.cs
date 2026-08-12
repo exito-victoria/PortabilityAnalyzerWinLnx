@@ -183,6 +183,18 @@ internal static class Program
                 Log.Information("Informe {Format} escrito en {Path}", fmt, path);
             }
 
+            // Informe EJECUTIVO (solo con --executive): InformeEjec_<proyecto>.docx en la carpeta del informe general.
+            if (options.Executive)
+            {
+                var dir = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath)) ?? ".";
+                var projName = ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)
+                    ? Path.GetFileNameWithoutExtension(options.InputPath)
+                    : Path.GetFileNameWithoutExtension(options.OutputPath);
+                var execPath = Path.Combine(dir, $"InformeEjec_{projName}.docx");
+                new ExecutiveWordExporter(projName).Export(report, execPath);
+                Log.Information("Informe ejecutivo escrito en {Path}", execPath);
+            }
+
             Log.Information("Analisis completado (bloqueantes: {Blockers}, esfuerzo medio: {Media:0.#} h)",
                 report.BlockerCount, report.TotalEffort.Media);
             return 0;
