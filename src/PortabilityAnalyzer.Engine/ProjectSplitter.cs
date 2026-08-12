@@ -38,9 +38,10 @@ public sealed class ProjectSplitter
             .Select(p => (Abs: p, Rel: System.IO.Path.GetRelativePath(projectDir, p)))
             .ToList();
 
-        // Mantener juntas las clases parciales: si un fichero comparte un tipo con un fichero Windows,
-        // tambien va a Windows (evita partir p. ej. Form1.cs + Form1.Designer.cs entre proyectos).
-        var winExpanded = ExpandByPartialTypes(allCs, winRelFiles);
+        // Propaga la marca Windows por clases PARCIALES (mismo tipo en varios ficheros) y por HERENCIA
+        // (una clase que deriva de un tipo que quedo en Windows tambien va a Windows). Asi, p. ej., los
+        // ViewModels que heredan de una base que usa System.Windows/Dispatcher no se quedan en Multi.
+        var winExpanded = ExpandWindowsSet(allCs, winRelFiles);
 
         var winFiles = allCs.Where(f => winExpanded.Contains(f.Rel)).ToList();
         var portableFiles = allCs.Where(f => !winExpanded.Contains(f.Rel)).ToList();
@@ -48,12 +49,21 @@ public sealed class ProjectSplitter
         RecreateDir(multiDir);
         RecreateDir(winDir);
 
+        // El proyecto Multi tiene su PROPIO namespace raiz (<root> -> <root>Multi), como pidio el cliente
+        // (p. ej. ToolsCommon -> ToolsCommonMulti). El proyecto Windows conserva el namespace original.
+        var rootNs = DetectRootNamespace(allCs);
+        var multiRootNs = rootNs is null ? null : rootNs + "Multi";
+        Func<string, string>? multiTransform =
+            (rootNs is null || multiRootNs is null) ? null : c => RebaseNamespace(c, rootNs, multiRootNs);
+
         foreach (var f in portableFiles)
             CopyWithHeader(f.Abs, System.IO.Path.Combine(multiDir, f.Rel),
-                $"[SCAFFOLD generado] Proyecto {multiName} (net8.0, multiplataforma). Revisar SPLIT-NOTES-{baseName}.md.");
+                $"[SCAFFOLD generado] Proyecto {multiName} (net8.0, multiplataforma). Namespace: {multiRootNs ?? multiName}. Revisar SPLIT-NOTES-{baseName}.md.",
+                multiTransform);
         foreach (var f in winFiles)
             CopyWithHeader(f.Abs, System.IO.Path.Combine(winDir, f.Rel),
-                $"[SCAFFOLD generado] Proyecto {winName} (net8.0-windows). Revisar SPLIT-NOTES-{baseName}.md.");
+                $"[SCAFFOLD generado] Proyecto {winName} (net8.0-windows). Revisar SPLIT-NOTES-{baseName}.md.",
+                null);
 
         var (packages, useWpf, useWinForms) = ReadCsproj(projectDir);
 
@@ -61,9 +71,18 @@ public sealed class ProjectSplitter
         WriteCsproj(System.IO.Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", packages, useWpf, useWinForms,
             $"..\\{multiName}\\{multiName}.csproj");
 
+        // Para que el codigo Windows resuelva por nombre simple los tipos que se movieron al Multi (ahora
+        // en <root>Multi...), se genera un GlobalUsings.cs en el proyecto Windows con esos namespaces.
+        var movedNamespaces = rootNs is null ? new List<string>()
+            : RebasedNamespacesOf(portableFiles, rootNs, multiRootNs!);
+        if (movedNamespaces.Count > 0)
+            WriteGlobalUsings(System.IO.Path.Combine(winDir, "GlobalUsings.cs"), movedNamespaces);
+
         var crossRefs = FindCrossReferences(portableFiles, winFiles);
 
         var manual = new List<string>();
+        if (rootNs is not null)
+            manual.Add($"Namespace separado: el proyecto {multiName} usa el namespace '{multiRootNs}' (el original '{rootNs}' se conserva en {winName}). Se ha generado GlobalUsings.cs en {winName} para resolver los tipos movidos; revisar referencias totalmente cualificadas que sigan usando '{rootNs}.'.");
         if (crossRefs.Count > 0)
             manual.Add($"{crossRefs.Count} referencia(s) de codigo portable a tipos que quedaron en {winName} (Windows): introducir una interfaz/abstraccion en {multiName} e implementarla en {winName}.");
         manual.Add($"Revisar las PackageReference de {multiName}: eliminar las que sean solo-Windows.");
@@ -98,11 +117,78 @@ public sealed class ProjectSplitter
         Directory.CreateDirectory(dir);
     }
 
-    private static void CopyWithHeader(string source, string target, string header)
+    private static void CopyWithHeader(string source, string target, string header, Func<string, string>? transform)
     {
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);
         var content = File.ReadAllText(source);
+        if (transform is not null) content = transform(content);
         File.WriteAllText(target, $"// {header}{Environment.NewLine}{content}");
+    }
+
+    /// <summary>Namespace raiz mas frecuente entre los ficheros (primer segmento). Base para el rebase del Multi.</summary>
+    private static string? DetectRootNamespace(List<(string Abs, string Rel)> allCs)
+    {
+        var roots = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var f in allCs)
+        {
+            try
+            {
+                var root = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
+                foreach (var ns in DeclaredNamespaces(root))
+                {
+                    var first = ns.Split('.')[0];
+                    roots[first] = roots.TryGetValue(first, out var n) ? n + 1 : 1;
+                }
+            }
+            catch { /* ignorar */ }
+        }
+        return roots.Count == 0 ? null : roots.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).First().Key;
+    }
+
+    private static IEnumerable<string> DeclaredNamespaces(SyntaxNode root)
+    {
+        foreach (var ns in root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>())
+            yield return ns.Name.ToString();
+    }
+
+    /// <summary>Reescribe el namespace raiz (declaraciones <c>namespace</c> y directivas <c>using</c>) de
+    /// <paramref name="root"/> a <paramref name="rootMulti"/>, respetando limites de palabra.</summary>
+    private static string RebaseNamespace(string content, string root, string rootMulti)
+    {
+        var esc = Regex.Escape(root);
+        content = Regex.Replace(content, $@"(\bnamespace\s+){esc}\b", $"$1{rootMulti}");
+        content = Regex.Replace(content, $@"(\busing\s+(?:static\s+)?){esc}\b", $"$1{rootMulti}");
+        return content;
+    }
+
+    /// <summary>Namespaces (ya rebasados a <c>root</c>Multi) declarados en los ficheros portables movidos.</summary>
+    private static List<string> RebasedNamespacesOf(List<(string Abs, string Rel)> portableFiles, string root, string rootMulti)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var f in portableFiles)
+        {
+            try
+            {
+                var node = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
+                foreach (var ns in DeclaredNamespaces(node))
+                {
+                    if (ns.Equals(root, StringComparison.Ordinal))
+                        result.Add(rootMulti);
+                    else if (ns.StartsWith(root + ".", StringComparison.Ordinal))
+                        result.Add(rootMulti + ns[root.Length..]);
+                }
+            }
+            catch { /* ignorar */ }
+        }
+        return result.OrderBy(x => x, StringComparer.Ordinal).ToList();
+    }
+
+    private static void WriteGlobalUsings(string path, IReadOnlyList<string> namespaces)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [SCAFFOLD generado] Resuelve por nombre simple los tipos movidos al proyecto Multi.");
+        foreach (var ns in namespaces) sb.AppendLine($"global using {ns};");
+        File.WriteAllText(path, sb.ToString());
     }
 
     private static (IReadOnlyList<string> Packages, bool UseWpf, bool UseWinForms) ReadCsproj(string projectDir)
@@ -146,26 +232,41 @@ public sealed class ProjectSplitter
         File.WriteAllText(path, sb.ToString());
     }
 
-    /// <summary>Expande el conjunto de ficheros Windows para no separar clases parciales entre proyectos.</summary>
-    private static HashSet<string> ExpandByPartialTypes(List<(string Abs, string Rel)> allCs, HashSet<string> winSet)
+    /// <summary>Expande el conjunto de ficheros Windows para (1) no separar clases parciales entre proyectos
+    /// y (2) arrastrar a Windows toda clase que herede de un tipo que quedo en Windows (herencia transitiva).
+    /// Itera hasta punto fijo.</summary>
+    private static HashSet<string> ExpandWindowsSet(List<(string Abs, string Rel)> allCs, HashSet<string> winSet)
     {
-        var typeFiles = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        // Parseo unico por fichero: tipos declarados, tipos base referenciados y mapa tipo -> ficheros.
+        var declaredByFile = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var basesByFile = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var filesByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
         foreach (var f in allCs)
         {
+            var declared = new HashSet<string>(StringComparer.Ordinal);
+            var bases = new HashSet<string>(StringComparer.Ordinal);
             try
             {
                 var root = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
                 foreach (var t in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
                 {
-                    if (!typeFiles.TryGetValue(t.Identifier.Text, out var set))
+                    declared.Add(t.Identifier.Text);
+                    if (!filesByType.TryGetValue(t.Identifier.Text, out var set))
                     {
                         set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        typeFiles[t.Identifier.Text] = set;
+                        filesByType[t.Identifier.Text] = set;
                     }
                     set.Add(f.Rel);
+
+                    if (t.BaseList is not null)
+                        foreach (var bt in t.BaseList.Types)
+                            bases.Add(BaseName(bt.Type));
                 }
             }
-            catch { /* ignorar */ }
+            catch { /* ignorar ficheros ilegibles */ }
+            declaredByFile[f.Rel] = declared;
+            basesByFile[f.Rel] = bases;
         }
 
         var result = new HashSet<string>(winSet, StringComparer.OrdinalIgnoreCase);
@@ -173,15 +274,38 @@ public sealed class ProjectSplitter
         while (changed)
         {
             changed = false;
-            foreach (var files in typeFiles.Values)
+
+            // (1) Clases parciales: un tipo declarado en varios ficheros mantiene todos juntos.
+            foreach (var files in filesByType.Values)
             {
                 if (files.Count < 2 || !files.Any(result.Contains)) continue;
                 foreach (var file in files)
                     if (result.Add(file)) changed = true;
             }
+
+            // (2) Herencia: tipos declarados en ficheros ya marcados Windows.
+            var winTypes = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var rel in result)
+                if (declaredByFile.TryGetValue(rel, out var d))
+                    foreach (var t in d) winTypes.Add(t);
+
+            foreach (var f in allCs)
+            {
+                if (result.Contains(f.Rel)) continue;
+                if (basesByFile.TryGetValue(f.Rel, out var bases) && bases.Any(winTypes.Contains))
+                    if (result.Add(f.Rel)) changed = true;
+            }
         }
         return result;
     }
+
+    /// <summary>Nombre simple del tipo base (sin genericos ni cualificacion): <c>A.B.Foo&lt;T&gt;</c> -&gt; <c>Foo</c>.</summary>
+    private static string BaseName(TypeSyntax t) => t switch
+    {
+        SimpleNameSyntax s => s.Identifier.Text,          // Foo, Foo<T>
+        QualifiedNameSyntax q => q.Right.Identifier.Text, // Namespace.Foo -> Foo
+        _ => t.ToString()
+    };
 
     private static IReadOnlyList<string> FindCrossReferences(
         List<(string Abs, string Rel)> portableFiles, List<(string Abs, string Rel)> winFiles)

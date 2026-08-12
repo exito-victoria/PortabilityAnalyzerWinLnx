@@ -19,6 +19,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
         AppendEstimationNote(sb);
 
+        AppendBuildOrderSection(sb, report);
         AppendBucketSummary(sb, report.CostByBucket);
         AppendArchitectureSection(sb, report);
         AppendSplitSection(sb, report);
@@ -208,6 +209,33 @@ public sealed class MarkdownReportExporter : IReportExporter
 
     /// <summary>Analisis en profundidad de los ensamblados de terceros (sin fuentes): dependencias
     /// nativas del SO, APIs Windows gestionadas, riesgo y reemplazo sugerido.</summary>
+    /// <summary>Orden correcto de compilacion de los proyectos (topologia de ProjectReference).</summary>
+    private static void AppendBuildOrderSection(StringBuilder sb, AnalysisReport report)
+    {
+        var bo = report.BuildOrder;
+        if (bo.Steps.Count == 0 && !bo.HasCycle) return;
+
+        sb.AppendLine("## Orden de compilación de los proyectos");
+        sb.AppendLine();
+        sb.AppendLine("> Orden derivado de las referencias de proyecto (`ProjectReference`): cada proyecto se compila **después** de aquellos a los que referencia. Los proyectos del **mismo nivel** no dependen entre sí y podrían compilarse en paralelo.");
+        sb.AppendLine();
+        sb.AppendLine("| # | Nivel | Proyecto | Depende de |");
+        sb.AppendLine("|---|-------|----------|------------|");
+        var i = 1;
+        foreach (var s in bo.Steps)
+        {
+            var dep = s.DependsOn.Count == 0 ? "— (sin dependencias internas)" : string.Join(", ", s.DependsOn);
+            sb.AppendLine($"| {i++} | {s.Level} | {Cell(s.Project)} | {Cell(dep)} |");
+        }
+        sb.AppendLine();
+
+        if (bo.HasCycle)
+        {
+            sb.AppendLine($"> ⚠️ **Ciclo de referencias detectado** entre: {Cell(string.Join(", ", bo.CycleProjects))}. No existe un orden lineal para esos proyectos; hay que romper el ciclo (extraer un proyecto común o invertir una dependencia).");
+            sb.AppendLine();
+        }
+    }
+
     private static void AppendThirdPartySection(StringBuilder sb, AnalysisReport report)
     {
         var profiles = ThirdPartyAnalysis.Analyze(report);

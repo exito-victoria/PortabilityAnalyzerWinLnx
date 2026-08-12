@@ -41,6 +41,7 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para("Cómo se estima (en horas-persona): cada dependencia se estima a tres puntos: O = optimista, M = más probable, P = pesimista. La media = (O + 4·M + P) / 6 (método PERT) es el valor esperado, es decir, la estimación más probable a efectos de planificación. El esfuerzo se cuenta una vez por regla y ensamblado (no por ocurrencia); a los terceros se les aplica un factor de incertidumbre; se añade un bucket de Pruebas y CI. La columna N (ocurr.) es el número de ocurrencias de esa dependencia (regla + evidencia)."));
         b.Append(Para(string.Empty));
 
+        AppendBuildOrderSection(b, report);
         AppendBucketSummary(b, report.CostByBucket);
         AppendArchitectureSection(b, report);
         AppendSplitSection(b, report);
@@ -263,6 +264,33 @@ public sealed class WordReportExporter : IReportExporter
     }
 
     /// <summary>Analisis en profundidad de los ensamblados de terceros (sin fuentes).</summary>
+    /// <summary>Orden correcto de compilacion de los proyectos (topologia de ProjectReference).</summary>
+    private static void AppendBuildOrderSection(Body b, AnalysisReport report)
+    {
+        var bo = report.BuildOrder;
+        if (bo.Steps.Count == 0 && !bo.HasCycle) return;
+
+        b.Append(Para("Orden de compilación de los proyectos", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Orden derivado de las referencias de proyecto (ProjectReference): cada proyecto se compila después de aquellos a los que referencia. Los proyectos del mismo nivel no dependen entre sí y podrían compilarse en paralelo."));
+
+        var i = 1;
+        var rows = bo.Steps.Select(s => new[]
+        {
+            (i++).ToString(),
+            s.Level.ToString(),
+            s.Project,
+            s.DependsOn.Count == 0 ? "— (sin dependencias internas)" : string.Join(", ", s.DependsOn)
+        });
+        b.Append(BuildTable(
+            new[] { "#", "Nivel", "Proyecto", "Depende de" },
+            new[] { 0.6, 0.9, 3.0, 4.0 },
+            rows));
+
+        if (bo.HasCycle)
+            b.Append(Para($"AVISO: ciclo de referencias detectado entre {string.Join(", ", bo.CycleProjects)}. No existe un orden lineal para esos proyectos; hay que romper el ciclo (extraer un proyecto común o invertir una dependencia).", bold: true));
+        b.Append(Para(string.Empty));
+    }
+
     private static void AppendThirdPartySection(Body b, AnalysisReport report)
     {
         var profiles = ThirdPartyAnalysis.Analyze(report);

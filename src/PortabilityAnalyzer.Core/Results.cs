@@ -66,4 +66,7 @@ public sealed record AnalysisReport
 
     /// <summary>Scaffolds de division generados para los proyectos con rol divisiblePorUI.</summary>
     public IReadOnlyList<SplitResult> SplitResults { get; init; } = new List<SplitResult>();
+
+    /// <summary>Orden correcto de compilacion de los proyectos (topologia de ProjectReference).</summary>
+    public BuildOrder BuildOrder { get; init; } = BuildOrder.Empty;
 }

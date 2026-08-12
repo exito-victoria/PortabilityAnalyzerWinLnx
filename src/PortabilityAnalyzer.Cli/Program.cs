@@ -83,6 +83,16 @@ internal static class Program
                     sourceFindings.Count, sourceFindings.Select(f => f.File).Distinct().Count());
             }
 
+            // Orden de compilacion (solo para .sln/.csproj): topologia de ProjectReference.
+            var buildOrder = BuildOrder.Empty;
+            if (ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
+            {
+                buildOrder = new ProjectDiscovery().ResolveBuildOrder(options.InputPath);
+                if (buildOrder.Steps.Count > 0 || buildOrder.HasCycle)
+                    Log.Information("Orden de compilacion: {Steps} proyecto(s){Cycle}",
+                        buildOrder.Steps.Count, buildOrder.HasCycle ? $", CICLO en {buildOrder.CycleProjects.Count}" : string.Empty);
+            }
+
             // Roles de proyecto (opcional): API obligatoria, no modificables, divisibles por UI.
             var roles = new ProjectRoles();
             if (options.RolesPath is not null && File.Exists(options.RolesPath))
@@ -152,7 +162,8 @@ internal static class Program
                 CostByBucket = costByBucket,
                 SourceFindings = sourceFindings,
                 Roles = roles,
-                SplitResults = splitResults
+                SplitResults = splitResults,
+                BuildOrder = buildOrder
             };
 
             // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico

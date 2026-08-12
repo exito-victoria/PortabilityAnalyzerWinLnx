@@ -43,6 +43,10 @@ public sealed class SourceCodeAnalyzer
         new("WindowsPrincipal", Kind.TypeName, "Identity"),
         new("WindowsImpersonationContext", Kind.TypeName, "Identity"),
         new("Dispatcher", Kind.TypeName, "Threading"),
+        new("DispatcherTimer", Kind.TypeName, "Threading"),
+        new("DispatcherObject", Kind.TypeName, "Threading"),
+        new("MessageBox", Kind.TypeName, "UI"),
+        new("NotifyIcon", Kind.TypeName, "UI"),
         new("ManagementObject", Kind.TypeName, "WMI"),
         new("ManagementObjectSearcher", Kind.TypeName, "WMI"),
         new("ManagementClass", Kind.TypeName, "WMI"),
@@ -65,6 +69,11 @@ public sealed class SourceCodeAnalyzer
 
     private static readonly HashSet<string> TypeNames =
         Signals.Where(s => s.Kind == Kind.TypeName).Select(s => s.Match).ToHashSet(StringComparer.Ordinal);
+
+    // Prefijos de espacio de nombres solo-Windows para detectar usos TOTALMENTE CUALIFICADOS sin `using`
+    // (p. ej. `System.Windows.Application.Current`, `System.Windows.Threading.DispatcherTimer`).
+    private static readonly Signal[] NamespacePrefixes =
+        Signals.Where(s => s.Kind == Kind.UsingNamespace).OrderByDescending(s => s.Match.Length).ToArray();
 
     public IReadOnlyList<SourceFinding> AnalyzeProjects(IEnumerable<(string Name, string Dir)> projects)
     {
@@ -95,6 +104,8 @@ public sealed class SourceCodeAnalyzer
                         UsingDirectiveSyntax u => FromUsing(u),
                         AttributeSyntax a => FromAttribute(a),
                         IdentifierNameSyntax id when TypeNames.Contains(id.Identifier.Text) => FromType(id),
+                        QualifiedNameSyntax q => FromQualified(q),
+                        MemberAccessExpressionSyntax ma => FromQualified(ma),
                         _ => null
                     };
                     if (f is null) continue;
@@ -167,6 +178,30 @@ public sealed class SourceCodeAnalyzer
     {
         var s = Signals.First(x => x.Kind == Kind.TypeName && x.Match == id.Identifier.Text);
         return (s, id.Identifier.Text);
+    }
+
+    /// <summary>Detecta un uso totalmente cualificado bajo un espacio de nombres solo-Windows
+    /// (p. ej. <c>System.Windows.Application.Current</c>) cuando no hay <c>using</c> que lo delate.
+    /// Solo dispara en el nodo mas externo y evita duplicar lo que ya capta la deteccion por tipo o
+    /// por <c>using</c>.</summary>
+    private static (Signal, string)? FromQualified(SyntaxNode node)
+    {
+        // Solo el nodo mas externo de la cadena cualificada (evita una senal por cada segmento anidado).
+        if (node.Parent is QualifiedNameSyntax or MemberAccessExpressionSyntax) return null;
+        // Los nombres dentro de un `using` ya los trata FromUsing.
+        if (node.FirstAncestorOrSelf<UsingDirectiveSyntax>() is not null) return null;
+
+        var full = node.ToString();
+        var s = NamespacePrefixes.FirstOrDefault(p =>
+            full.Equals(p.Match, StringComparison.Ordinal) || full.StartsWith(p.Match + ".", StringComparison.Ordinal));
+        if (s is null) return null;
+
+        // Si algun segmento ya es un tipo conocido, deja que la deteccion por tipo lo reporte (sin duplicar).
+        if (node.DescendantTokens().Any(t => t.IsKind(SyntaxKind.IdentifierToken) && TypeNames.Contains(t.ValueText)))
+            return null;
+
+        var symbol = full.Length <= 120 ? full : full[..120] + "...";
+        return (s, symbol);
     }
 
     private static string? ContainingMember(SyntaxNode node)
