@@ -1,0 +1,12 @@
+root = true
+
+# Fuentes C#: UTF-8 CON BOM para que el compilador (incluido Visual Studio) lea siempre bien los
+# literales acentuados, independientemente del codepage ANSI del sistema (evita perder las tildes).
+[*.cs]
+charset = utf-8-bom
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+
+[*.{json,md,csproj,sln}]
+charset = utf-8

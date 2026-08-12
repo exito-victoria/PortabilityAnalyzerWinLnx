@@ -1,4 +1,4 @@
-namespace PortabilityAnalyzer.Core;
+﻿namespace PortabilityAnalyzer.Core;
 
 /// <summary>
 /// Bucket (categoria) de coste del trabajo de hacer la aplicacion multiplataforma en .NET 8.

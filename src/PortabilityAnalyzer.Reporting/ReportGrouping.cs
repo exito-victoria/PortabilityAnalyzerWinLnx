@@ -1,4 +1,4 @@
-using PortabilityAnalyzer.Core;
+﻿using PortabilityAnalyzer.Core;
 
 namespace PortabilityAnalyzer.Reporting;
 
