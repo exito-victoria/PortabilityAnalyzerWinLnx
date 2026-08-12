@@ -11,7 +11,7 @@ public sealed class MarkdownReportExporter : IReportExporter
     public void Export(AnalysisReport report, string outputPath)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("# Informe de análisis multiplataforma (.NET 8) - Windows / Linux");
+        sb.AppendLine("# Informe de análisis multiplataforma (.NET 8) - portabilidad de Windows");
         sb.AppendLine();
         sb.AppendLine($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}  ");
         sb.AppendLine($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}  ");
@@ -24,6 +24,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         AppendArchitectureSection(sb, report);
         AppendSplitSection(sb, report);
         AppendThirdPartySection(sb, report);
+        AppendNonModifiableSection(sb, report);
         AppendImpactSection(sb, report);
         AppendSourceSection(sb, report);
         AppendCodeExamplesSection(sb, report);
@@ -73,7 +74,7 @@ public sealed class MarkdownReportExporter : IReportExporter
 
         sb.AppendLine("## Arquitectura destino recomendada y plan de migración");
         sb.AppendLine();
-        sb.AppendLine($"Objetivo: **core .NET 8 común** + **WPF en Windows** y **Avalonia en Linux**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
+        sb.AppendLine($"Objetivo: **núcleo .NET 8 portable** lo más grande posible + **lo obligatoriamente Windows aislado** (Platform.Windows / `#if`), dejando el resto **preparado para otro equipo**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
         sb.AppendLine();
 
         if (plan.RoleNotes.Count > 0)
@@ -146,9 +147,9 @@ public sealed class MarkdownReportExporter : IReportExporter
         var examples = CodeExamples.ForCategories(cats);
         if (examples.Count == 0) return;
 
-        sb.AppendLine("## Equivalencias Linux y compilación condicional (ejemplos)");
+        sb.AppendLine("## Aislamiento por SO y equivalencias portables (ejemplos)");
         sb.AppendLine();
-        sb.AppendLine("> Ejemplos de código para cada tipo de dependencia detectada: la equivalencia multiplataforma o cómo aislarla por SO (`OperatingSystem.IsWindows()` / `#if`).");
+        sb.AppendLine("> Ejemplos de código para cada tipo de dependencia detectada: la equivalencia portable o cómo aislar lo que hoy exige Windows (`OperatingSystem.IsWindows()` / `#if`), dejando el hueco preparado. No se desarrolla la implementación de otra plataforma.");
         sb.AppendLine();
         foreach (var e in examples)
         {
@@ -162,6 +163,31 @@ public sealed class MarkdownReportExporter : IReportExporter
         }
     }
 
+    /// <summary>Terceros no modificables (ACRA/XMA/Safran): restricción + opciones viables detalladas.</summary>
+    private static void AppendNonModifiableSection(StringBuilder sb, AnalysisReport report)
+    {
+        var providers = NonModifiableOptions.Analyze(report);
+        if (providers.Count == 0) return;
+
+        sb.AppendLine("## Terceros no modificables: restricción y opciones viables");
+        sb.AppendLine();
+        sb.AppendLine("> Estos componentes son de proveedores externos: **no se pueden migrar ni modificar** (lo debe hacer el proveedor) y su esfuerzo **no se imputa** a nuestro total. Para cada uno se detallan las **vías viables** para poder ejecutarlo en el entorno destino.");
+        sb.AppendLine();
+        foreach (var p in providers)
+        {
+            sb.AppendLine($"### {p.Assembly}");
+            sb.AppendLine();
+            sb.AppendLine($"**Restricción.** {p.Restriccion}");
+            sb.AppendLine();
+            foreach (var o in p.Opciones)
+            {
+                var marca = o.Recomendada ? " ✅ (recomendada)" : string.Empty;
+                sb.AppendLine($"- **{o.Titulo}**{marca}: {o.Detalle}");
+            }
+            sb.AppendLine();
+        }
+    }
+
     /// <summary>Métrica de impacto: clases y ficheros afectados por proyecto (además de las horas).</summary>
     private static void AppendImpactSection(StringBuilder sb, AnalysisReport report)
     {
@@ -171,13 +197,14 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
         sb.AppendLine("> Métrica de tamaño del cambio (además de las horas): cuántas clases y ficheros de cada proyecto usan APIs de Windows.");
         sb.AppendLine();
-        sb.AppendLine("| Proyecto | Ficheros afectados | Clases afectadas | Usos Windows | Ficheros |");
-        sb.AppendLine("|----------|--------------------|------------------|--------------|----------|");
+        sb.AppendLine("| Proyecto | Nº ficheros | Nº clases | Usos Windows | Clases afectadas | Ficheros afectados |");
+        sb.AppendLine("|----------|-------------|-----------|--------------|------------------|--------------------|");
         foreach (var g in report.SourceFindings.GroupBy(f => f.Project).OrderByDescending(g => g.Count()))
         {
             var ficheros = g.Select(f => f.File).Distinct().OrderBy(x => x).ToList();
-            var clases = g.Where(f => !string.IsNullOrEmpty(f.Clase)).Select(f => f.Clase!).Distinct().Count();
-            sb.AppendLine($"| {Cell(g.Key)} | {ficheros.Count} | {clases} | {g.Count()} | {Cell(string.Join(", ", ficheros))} |");
+            var clases = g.Where(f => !string.IsNullOrEmpty(f.Clase)).Select(f => f.Clase!).Distinct().OrderBy(x => x).ToList();
+            var clasesTexto = clases.Count == 0 ? "—" : string.Join(", ", clases);
+            sb.AppendLine($"| {Cell(g.Key)} | {ficheros.Count} | {clases.Count} | {g.Count()} | {Cell(clasesTexto)} | {Cell(string.Join(", ", ficheros))} |");
         }
         sb.AppendLine();
     }
@@ -274,7 +301,7 @@ public sealed class MarkdownReportExporter : IReportExporter
             {
                 sb.AppendLine("**APIs Windows gestionadas (no P/Invoke):**");
                 sb.AppendLine();
-                sb.AppendLine("| Categoría | API / tipo Windows | Sitios | Alternativa Linux / multiplataforma |");
+                sb.AppendLine("| Categoría | API / tipo Windows | Sitios | Alternativa portable / multiplataforma |");
                 sb.AppendLine("|-----------|--------------------|--------|-------------------------------------|");
                 foreach (var a in p.WindowsApis)
                     sb.AppendLine($"| {Cell(a.Categoria)} | {Cell(a.Api)} | {a.Sites} | {Cell(a.AlternativaLinux)} |");
@@ -316,7 +343,7 @@ public sealed class MarkdownReportExporter : IReportExporter
     /// redundante con Severidad (un bloqueante tiene severidad Bloqueante).</summary>
     private static void AppendConfirmedTable(StringBuilder sb, IReadOnlyList<FindingGroup> groups)
     {
-        sb.AppendLine("| Regla | Severidad | N (ocurr.) | Esfuerzo (h) | Ubicación (ejemplo) | Estrategia | Evidencia | Alternativa Linux (reemplazo propuesto) | Pasos de remediación |");
+        sb.AppendLine("| Regla | Severidad | N (ocurr.) | Esfuerzo (h) | Ubicación (ejemplo) | Estrategia | Evidencia | Alternativa portable / multiplataforma (reemplazo propuesto) | Pasos de remediación |");
         sb.AppendLine("|-------|-----------|------------|--------------|---------------------|------------|-----------|------------------------------------------|----------------------|");
         foreach (var g in groups)
         {

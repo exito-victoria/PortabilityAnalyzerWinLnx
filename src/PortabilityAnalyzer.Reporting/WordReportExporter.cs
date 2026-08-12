@@ -34,7 +34,7 @@ public sealed class WordReportExporter : IReportExporter
         mainPart.Document = new Document();
         var b = mainPart.Document.AppendChild(new Body());
 
-        b.Append(Para("Informe de análisis multiplataforma (.NET 8) - Windows / Linux", bold: true, sizeHalfPt: 36));
+        b.Append(Para("Informe de análisis multiplataforma (.NET 8) - portabilidad de Windows", bold: true, sizeHalfPt: 36));
         b.Append(Para($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}"));
         b.Append(Para($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}"));
         b.Append(Para($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h"));
@@ -46,6 +46,7 @@ public sealed class WordReportExporter : IReportExporter
         AppendArchitectureSection(b, report);
         AppendSplitSection(b, report);
         AppendThirdPartySection(b, report);
+        AppendNonModifiableSection(b, report);
         AppendImpactSection(b, report);
         AppendSourceSection(b, report);
         AppendCodeExamplesSection(b, report);
@@ -75,7 +76,7 @@ public sealed class WordReportExporter : IReportExporter
             if (confirmed.Count > 0)
             {
                 b.Append(BuildTable(
-                    new[] { "Regla", "Severidad", "N (ocurr.)", "Esfuerzo (h)", "Ubicación (ejemplo)", "Estrategia", "Evidencia", "Alternativa Linux (reemplazo propuesto)", "Pasos de remediación" },
+                    new[] { "Regla", "Severidad", "N (ocurr.)", "Esfuerzo (h)", "Ubicación (ejemplo)", "Estrategia", "Evidencia", "Alternativa portable / multiplataforma (reemplazo propuesto)", "Pasos de remediación" },
                     confirmedWeights,
                     confirmed.Select(g =>
                     {
@@ -134,7 +135,7 @@ public sealed class WordReportExporter : IReportExporter
         var plan = ArchitectureRecommendation.Build(report);
 
         b.Append(Para("Arquitectura destino recomendada y plan de migración", bold: true, sizeHalfPt: 28));
-        b.Append(Para($"Objetivo: core .NET 8 común + WPF en Windows y Avalonia en Linux. Esfuerzo total estimado (con Pruebas y CI): {plan.TotalWithTesting.Media:0.#} h (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}."));
+        b.Append(Para($"Objetivo: núcleo .NET 8 portable lo más grande posible + lo obligatoriamente Windows aislado (Platform.Windows / #if), dejando el resto preparado para otro equipo. Esfuerzo total estimado (con Pruebas y CI): {plan.TotalWithTesting.Media:0.#} h (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}."));
 
         if (plan.RoleNotes.Count > 0)
         {
@@ -193,8 +194,8 @@ public sealed class WordReportExporter : IReportExporter
         var examples = CodeExamples.ForCategories(cats);
         if (examples.Count == 0) return;
 
-        b.Append(Para("Equivalencias Linux y compilación condicional (ejemplos)", bold: true, sizeHalfPt: 28));
-        b.Append(Para("Ejemplos de código para cada tipo de dependencia detectada: la equivalencia multiplataforma o cómo aislarla por SO."));
+        b.Append(Para("Aislamiento por SO y equivalencias portables (ejemplos)", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Ejemplos de código para cada tipo de dependencia detectada: la equivalencia portable o cómo aislar lo que hoy exige Windows (OperatingSystem.IsWindows() / #if), dejando el hueco preparado. No se desarrolla la implementación de otra plataforma."));
         foreach (var e in examples)
         {
             b.Append(Para(e.Titulo, bold: true, sizeHalfPt: 24));
@@ -217,6 +218,27 @@ public sealed class WordReportExporter : IReportExporter
     }
 
     /// <summary>Métrica de impacto: clases y ficheros afectados por proyecto.</summary>
+    /// <summary>Terceros no modificables (ACRA/XMA/Safran): restriccion + opciones viables detalladas.</summary>
+    private static void AppendNonModifiableSection(Body b, AnalysisReport report)
+    {
+        var providers = NonModifiableOptions.Analyze(report);
+        if (providers.Count == 0) return;
+
+        b.Append(Para("Terceros no modificables: restricción y opciones viables", bold: true, sizeHalfPt: 28));
+        b.Append(Para("Estos componentes son de proveedores externos: no se pueden migrar ni modificar (lo debe hacer el proveedor) y su esfuerzo no se imputa a nuestro total. Para cada uno se detallan las vías viables para poder ejecutarlo en el entorno destino."));
+        foreach (var p in providers)
+        {
+            b.Append(Para(p.Assembly, bold: true, sizeHalfPt: 24));
+            b.Append(Para($"Restricción. {p.Restriccion}"));
+            foreach (var o in p.Opciones)
+            {
+                var marca = o.Recomendada ? " [RECOMENDADA]" : string.Empty;
+                b.Append(Para($"• {o.Titulo}{marca}: {o.Detalle}"));
+            }
+        }
+        b.Append(Para(string.Empty));
+    }
+
     private static void AppendImpactSection(Body b, AnalysisReport report)
     {
         if (report.SourceFindings.Count == 0) return;
@@ -230,13 +252,14 @@ public sealed class WordReportExporter : IReportExporter
             .Select(g =>
             {
                 var ficheros = g.Select(f => f.File).Distinct().OrderBy(x => x).ToList();
-                var clases = g.Where(f => !string.IsNullOrEmpty(f.Clase)).Select(f => f.Clase!).Distinct().Count();
-                return new[] { g.Key, ficheros.Count.ToString(), clases.ToString(), g.Count().ToString(), string.Join(", ", ficheros) };
+                var clases = g.Where(f => !string.IsNullOrEmpty(f.Clase)).Select(f => f.Clase!).Distinct().OrderBy(x => x).ToList();
+                var clasesTexto = clases.Count == 0 ? "—" : string.Join(", ", clases);
+                return new[] { g.Key, ficheros.Count.ToString(), clases.Count.ToString(), g.Count().ToString(), clasesTexto, string.Join(", ", ficheros) };
             });
 
         b.Append(BuildTable(
-            new[] { "Proyecto", "Ficheros afectados", "Clases afectadas", "Usos Windows", "Ficheros" },
-            new[] { 2.0, 1.4, 1.4, 1.2, 4.0 },
+            new[] { "Proyecto", "Nº ficheros", "Nº clases", "Usos Windows", "Clases afectadas", "Ficheros afectados" },
+            new[] { 1.8, 1.0, 1.0, 1.1, 3.0, 3.0 },
             rows));
         b.Append(Para(string.Empty));
     }
@@ -323,7 +346,7 @@ public sealed class WordReportExporter : IReportExporter
             {
                 b.Append(Para("APIs Windows gestionadas (no P/Invoke):", bold: true));
                 b.Append(BuildTable(
-                    new[] { "Categoría", "API / tipo Windows", "Sitios", "Alternativa Linux / multiplataforma" },
+                    new[] { "Categoría", "API / tipo Windows", "Sitios", "Alternativa portable / multiplataforma" },
                     new[] { 2.0, 3.0, 1.0, 4.0 },
                     p.WindowsApis.Select(a => new[] { a.Categoria, a.Api, a.Sites.ToString(), a.AlternativaLinux })));
             }

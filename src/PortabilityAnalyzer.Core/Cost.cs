@@ -37,8 +37,8 @@ public static class CostBuckets
         CostBucket.NucleoComun => "Adaptación a núcleo común",
         CostBucket.SeparacionAbstraccion => "Separación por plataforma (abstracción)",
         CostBucket.ReemplazoDependencias => "Reemplazo de dependencias",
-        CostBucket.UILinux => "UI Linux (Avalonia)",
-        CostBucket.PruebasCI => "Pruebas y CI en ambos SO",
+        CostBucket.UILinux => "Separación de la UI (capa de presentación portable)",
+        CostBucket.PruebasCI => "Pruebas y CI multiplataforma",
         _ => "Sin clasificar"
     };
 }

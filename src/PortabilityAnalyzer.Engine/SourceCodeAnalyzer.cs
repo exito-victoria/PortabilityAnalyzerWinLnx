@@ -242,19 +242,19 @@ public sealed class SourceCodeAnalyzer
 
     private static string Fix(string categoria) => categoria switch
     {
-        "UI" => "La UI no es portable: separar la lógica al core y reimplementar la UI de Linux con Avalonia (MVVM), reutilizando ViewModels.",
-        "Database" => "Migrar a Oracle.ManagedDataAccess.Client (paquete .Core, multiplataforma) y adaptar la cadena de conexión.",
+        "UI" => "La UI no es portable: separar la lógica/ViewModels al núcleo portable; mantener la UI WPF en Windows y dejar la UI no-Windows preparada para otro equipo.",
+        "Database" => "Migrar a Oracle.ManagedDataAccess.Client (paquete .Core, portable) y adaptar la cadena de conexión.",
         "Registry" => "Externalizar la configuración (appsettings.json / IConfiguration); si debe seguir en Windows, aislar tras una interfaz ISettingsStore por SO.",
-        "Identity" => "Sustituir la identidad de Windows por un esquema multiplataforma (Kerberos/GSSAPI, tokens, LDAP) tras una interfaz IUserIdentity.",
-        "Threading" => "En el core, reemplazar la sincronización con UI por async/await; STAThread/Dispatcher solo en el arranque de la UI Windows.",
-        "Cryptography" => "Usar las factorías multiplataforma (RSA.Create/Aes.Create); DPAPI no existe en Linux (re-cifrar los secretos).",
-        "WMI" => "Sustituir WMI por /proc, /sys o librerías del sistema, tras una abstracción por SO.",
-        "COM" => "COM no existe en Linux: abstraer el servicio tras una interfaz multiplataforma o eliminar la dependencia.",
-        "EventLog" => "Migrar el logging a un framework multiplataforma (Serilog / Microsoft.Extensions.Logging) con salida a fichero/syslog.",
-        "PerformanceCounter" => "Migrar a EventCounters / System.Diagnostics.Metrics (multiplataforma).",
-        "ServiceProcess" => "Usar Microsoft.Extensions.Hosting; en Linux integrar con systemd en vez de servicios de Windows.",
-        "PlatformAttribute" => "API marcada solo-Windows: buscar equivalente multiplataforma o aislar con OperatingSystem.IsWindows().",
-        "PInvoke" => "Sustituir por la API gestionada equivalente o aislar la llamada tras una interfaz (P/Invoke solo en Windows; alternativa en Linux).",
-        _ => "Revisar el uso: sustituir por un equivalente multiplataforma o proteger por SO (OperatingSystem.IsWindows())."
+        "Identity" => "Aislar la identidad tras una interfaz IUserIdentity; implementación Windows aquí, la no-Windows queda como seam para otro equipo.",
+        "Threading" => "En el núcleo, reemplazar la sincronización con UI por async/await; STAThread/Dispatcher solo en el arranque de la UI Windows.",
+        "Cryptography" => "Usar las factorías portables (RSA.Create/Aes.Create); DPAPI está atado a Windows (re-cifrar los secretos con clave gestionada externamente).",
+        "WMI" => "Aislar la consulta tras una interfaz; parte ya la da RuntimeInformation (portable), el resto queda como seam para otro equipo.",
+        "COM" => "COM está atado a Windows: abstraer el servicio tras una interfaz portable o eliminar la dependencia.",
+        "EventLog" => "Migrar el logging a un framework portable (Serilog / Microsoft.Extensions.Logging) con salida a consola/fichero.",
+        "PerformanceCounter" => "Migrar a EventCounters / System.Diagnostics.Metrics (portable).",
+        "ServiceProcess" => "Usar Microsoft.Extensions.Hosting (host portable); la integración con el gestor de servicios no-Windows queda para otro equipo.",
+        "PlatformAttribute" => "API marcada solo-Windows: buscar equivalente portable o aislar con OperatingSystem.IsWindows().",
+        "PInvoke" => "Sustituir por la API gestionada equivalente o aislar la llamada tras una interfaz (P/Invoke solo en Windows; la alternativa no-Windows queda como seam).",
+        _ => "Revisar el uso: sustituir por un equivalente portable o proteger por SO (OperatingSystem.IsWindows())."
     };
 }

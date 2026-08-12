@@ -2,7 +2,7 @@
   "_comentario": "Roles de proyecto para la recomendacion multiplataforma. Se pasa con --roles. La coincidencia por nombre es flexible (sin distinguir mayusculas, por subcadena).",
   "obligatorioMultiplataforma": [
     "ProgrammingManagerService",
-    "ProgrammingManagerLib"
+    "ProgrammingManagerServiceLib"
   ],
   "noModificables": [
     "ACRA",

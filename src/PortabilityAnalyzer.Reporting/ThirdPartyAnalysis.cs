@@ -93,7 +93,7 @@ public static class ThirdPartyAnalysis
     }
 
     public static string DependencyKind(NativeDependency d) =>
-        d.IsWindowsSystem ? "Sistema Windows" : "Nativa de terceros (verificar .so en Linux)";
+        d.IsWindowsSystem ? "Sistema Windows" : "Nativa de terceros (verificar disponibilidad multiplataforma)";
 
     /// <summary>Nombre concreto de la API/tipo Windows del hallazgo: prioriza la evidencia (tipo, atributo o
     /// API detectada); si falta, cae al tipo declarante y por ultimo a la regla.</summary>
