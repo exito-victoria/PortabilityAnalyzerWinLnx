@@ -430,15 +430,19 @@ public sealed class WordReportExporter : IReportExporter
             grid.Append(new GridColumn { Width = w.ToString() });
         table.AppendChild(grid);
 
-        table.AppendChild(BuildRow(headers, widths, bold: true));
+        table.AppendChild(BuildRow(headers, widths, bold: true, header: true));
         foreach (var r in rows)
             table.AppendChild(BuildRow(r, widths, bold: false));
         return table;
     }
 
-    private static TableRow BuildRow(string[] cells, int[] widths, bool bold)
+    private static TableRow BuildRow(string[] cells, int[] widths, bool bold, bool header = false)
     {
         var row = new TableRow();
+        // La fila de cabecera se marca con <w:tblHeader/> para que Word la REPITA en cada pagina
+        // cuando la tabla se parte en varias hojas.
+        if (header)
+            row.Append(new TableRowProperties(new TableHeader()));
         for (int i = 0; i < cells.Length; i++)
         {
             var props = new TableCellProperties(
