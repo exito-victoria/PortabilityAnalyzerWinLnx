@@ -51,6 +51,12 @@ public sealed class ProjectSplitter
             if (f.Rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
                 winRelFiles.Add(f.Rel);
 
+        // El PUNTO DE ENTRADA (fichero con Main o con top-level statements) va al proyecto Windows, que es
+        // el que conserva el OutputType ejecutable; asi el exe no queda sin Main (CS5001).
+        foreach (var f in codeFiles)
+            if (IsEntryPoint(f.Abs))
+                winRelFiles.Add(f.Rel);
+
         // Propaga la marca Windows por clases PARCIALES (mismo tipo en varios ficheros) y por HERENCIA
         // (una clase que deriva de un tipo que quedo en Windows tambien va a Windows). Asi, p. ej., los
         // ViewModels que heredan de una base que usa System.Windows/Dispatcher no se quedan en Multi.
@@ -103,18 +109,43 @@ public sealed class ProjectSplitter
         var winOutputType = hasAppXaml && !(outputType?.Contains("Exe", StringComparison.OrdinalIgnoreCase) ?? false)
             ? "WinExe" : outputType;
 
+        // SCAFFOLDING DE SEAMS: por cada categoria de API Windows detectada en el proyecto se genera una
+        // interfaz portable (en el Multi) y su implementacion Windows real (en el proyecto Windows), con el
+        // paquete NuGet necesario. Deja el cambio ESTRUCTURADO y compilable, a falta de conectarlo al codigo.
+        var seamMultiNs = (multiRootNs ?? multiName) + ".Seams";
+        var seamWinNs = winName + ".Seams";
+        var categorias = findings
+            .Where(f => string.Equals(f.Project, projectName, StringComparison.OrdinalIgnoreCase))
+            .Select(f => f.Categoria)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var generatedSeams = new List<SeamSpec>();
+        var seamPackages = new List<string>();
+        foreach (var cat in categorias)
+        {
+            if (!Seams.TryGetValue(cat, out var spec)) continue;
+            WriteCsFile(System.IO.Path.Combine(multiDir, "Seams", $"{spec.Interfaz}.cs"), BuildSeamInterface(spec, seamMultiNs));
+            WriteCsFile(System.IO.Path.Combine(winDir, "Seams", $"{spec.ImplClase}.cs"), BuildSeamWindowsImpl(spec, seamMultiNs, seamWinNs, winName));
+            generatedSeams.Add(spec);
+            if (spec.Package is not null && !seamPackages.Contains(spec.Package)) seamPackages.Add(spec.Package);
+        }
+        // Ejemplo de aislamiento por SO EN EL PROPIO CODIGO (compilacion condicional), ya implementado.
+        WriteCsFile(System.IO.Path.Combine(winDir, "Portabilidad", "EjemploPorSistemaOperativo.cs"), BuildConditionalExample(seamWinNs));
+
         var multiHasAsmInfo = portableFiles.Any(f => IsAssemblyInfo(f.Rel));
         var winHasAsmInfo = winFiles.Any(f => IsAssemblyInfo(f.Rel));
+        var winPackages = packages.Concat(seamPackages).ToList();
 
         WriteCsproj(System.IO.Path.Combine(multiDir, multiName + ".csproj"), "net8.0", packages, false, false, null,
             outputType: null, generateAssemblyInfo: !multiHasAsmInfo);
-        WriteCsproj(System.IO.Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", packages, useWpf, useWinForms,
+        WriteCsproj(System.IO.Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", winPackages, useWpf, useWinForms,
             $"..\\{multiName}\\{multiName}.csproj", winOutputType, generateAssemblyInfo: !winHasAsmInfo);
 
-        // Para que el codigo Windows resuelva por nombre simple los tipos que se movieron al Multi (ahora
-        // en <root>Multi...), se genera un GlobalUsings.cs en el proyecto Windows con esos namespaces.
+        // Para que el codigo Windows resuelva por nombre simple los tipos movidos al Multi y los seams,
+        // se genera un GlobalUsings.cs en el proyecto Windows con esos namespaces.
         var movedNamespaces = rootNs is null ? new List<string>()
             : RebasedNamespacesOf(portableFiles, rootNs, multiRootNs!);
+        if (generatedSeams.Count > 0 && !movedNamespaces.Contains(seamMultiNs)) movedNamespaces.Add(seamMultiNs);
         if (movedNamespaces.Count > 0)
             WriteGlobalUsings(System.IO.Path.Combine(winDir, "GlobalUsings.cs"), movedNamespaces);
 
@@ -130,10 +161,12 @@ public sealed class ProjectSplitter
         if (winContent.Concat(multiContent).Any(f => f.Rel.EndsWith(".settings", StringComparison.OrdinalIgnoreCase)))
             manual.Add("Se detecto Properties/Settings (proyecto clasico): el Settings.Designer.cs requiere el paquete System.Configuration.ConfigurationManager; anadirlo o migrar la configuracion a IConfiguration (appsettings.json).");
         manual.Add($"Revisar las PackageReference de {multiName}: eliminar las que sean solo-Windows.");
+        manual.Add($"Si el proyecto original referenciaba a OTROS proyectos de la solucion (ProjectReference), anadir esas referencias a {multiName}/{winName} segun donde encaje cada uso (el scaffold solo enlaza {winName} -> {multiName}).");
         manual.Add("El scaffold es un punto de partida: compilar cada proyecto y resolver los errores de referencias que queden.");
 
         WriteSplitNotes(System.IO.Path.Combine(outputDir, $"SPLIT-NOTES-{baseName}.md"),
-            projectName, multiName, winName, portableFiles.Count, winFiles.Count, crossRefs, manual);
+            projectName, multiName, winName, portableFiles.Count, winFiles.Count, crossRefs, manual,
+            generatedSeams, seamMultiNs, seamWinNs);
 
         return new SplitResult
         {
@@ -243,6 +276,19 @@ public sealed class ProjectSplitter
     /// <summary>True si el fichero es un AssemblyInfo.cs clasico (choca con GenerateAssemblyInfo del SDK).</summary>
     private static bool IsAssemblyInfo(string rel) =>
         System.IO.Path.GetFileName(rel).Equals("AssemblyInfo.cs", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True si el fichero contiene el punto de entrada: un metodo <c>static Main</c> o top-level statements.</summary>
+    private static bool IsEntryPoint(string absPath)
+    {
+        try
+        {
+            var root = CSharpSyntaxTree.ParseText(File.ReadAllText(absPath)).GetRoot();
+            if (root.DescendantNodes().OfType<GlobalStatementSyntax>().Any()) return true;
+            return root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .Any(m => m.Identifier.Text == "Main" && m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.StaticKeyword)));
+        }
+        catch { return false; }
+    }
 
     /// <summary>Namespace raiz mas frecuente entre los ficheros (primer segmento). Base para el rebase del Multi.</summary>
     private static string? DetectRootNamespace(List<(string Abs, string Rel)> allCs)
@@ -467,16 +513,65 @@ public sealed class ProjectSplitter
     }
 
     private static void WriteSplitNotes(string path, string original, string multiName, string winName,
-        int portable, int windows, IReadOnlyList<string> crossRefs, IReadOnlyList<string> manual)
+        int portable, int windows, IReadOnlyList<string> crossRefs, IReadOnlyList<string> manual,
+        IReadOnlyList<SeamSpec> seams, string seamMultiNs, string seamWinNs)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# División de {original} (scaffold)");
+        sb.AppendLine($"# División de {original} — guía de finalización");
         sb.AppendLine();
-        sb.AppendLine($"- **{multiName}** (net8.0, multiplataforma): {portable} ficheros portables.");
-        sb.AppendLine($"- **{winName}** (net8.0-windows): {windows} ficheros con dependencias de Windows.");
+        sb.AppendLine("> Objetivo: dejar cada proyecto **listo y funcional a falta de pruebas**. Aquí tienes, paso a paso y con código, lo que queda por hacer.");
         sb.AppendLine();
-        sb.AppendLine("> Es un punto de partida generado automáticamente por fichero. Revisar y ajustar.");
+
+        sb.AppendLine("## Qué se ha generado");
+        sb.AppendLine($"- **{multiName}** (net8.0, portable): {portable} fichero(s) de código" + (seams.Count > 0 ? " + interfaces `Seams` portables." : "."));
+        sb.AppendLine($"- **{winName}** (net8.0-windows): {windows} fichero(s) de código" + (seams.Count > 0 ? " + implementaciones Windows de los seams (con sus paquetes NuGet)" : "") + " + `GlobalUsings.cs` + `Portabilidad/EjemploPorSistemaOperativo.cs`.");
+        if (seams.Count > 0)
+        {
+            sb.AppendLine("- **Seams generados** (interfaz portable ↔ implementación Windows):");
+            foreach (var s in seams) sb.AppendLine($"  - `{s.Interfaz}` ↔ `{s.ImplClase}` — {s.Titulo}");
+        }
         sb.AppendLine();
+
+        sb.AppendLine("## Paso a paso");
+        sb.AppendLine($"1. **Compila `{multiName}`** (portable): no debe referenciar WPF/WinForms/Win32. Resuelve las referencias cruzadas (abajo) moviendo tipos o introduciendo interfaces.");
+        sb.AppendLine($"2. **Compila `{winName}`**: ya trae los `PackageReference` necesarios y una `ProjectReference` a `{multiName}`.");
+        if (seams.Count > 0)
+        {
+            sb.AppendLine($"3. **Registra los seams** por inyección de dependencias en el arranque de `{winName}`:");
+            sb.AppendLine();
+            sb.AppendLine("   ```csharp");
+            foreach (var s in seams) sb.AppendLine($"   services.AddSingleton<{s.Interfaz}, {s.ImplClase}>();");
+            sb.AppendLine("   ```");
+            sb.AppendLine($"   (Interfaces en `{seamMultiNs}`; implementaciones en `{seamWinNs}`.)");
+            sb.AppendLine($"4. **En el núcleo `{multiName}`**, sustituye los usos directos de la API de Windows por la interfaz correspondiente (ver \"Cambios por categoría\").");
+            sb.AppendLine("5. **Implementación no-Windows**: la interfaz de cada seam queda lista; su implementación para otros SO se deja preparada para otro equipo.");
+        }
+        else
+        {
+            sb.AppendLine($"3. Sustituye en el núcleo los usos de la API de Windows por interfaces (seams) e impleméntalas en `{winName}`.");
+        }
+        sb.AppendLine("6. **Prueba** cada proyecto.");
+        sb.AppendLine();
+
+        if (seams.Count > 0)
+        {
+            sb.AppendLine("## Cambios por categoría (con código propuesto)");
+            sb.AppendLine();
+            foreach (var s in seams)
+            {
+                sb.AppendLine($"### {s.Titulo}");
+                sb.AppendLine(s.QueCambiar);
+                sb.AppendLine();
+                sb.AppendLine("```csharp");
+                sb.AppendLine("// Antes (solo Windows):");
+                sb.AppendLine(s.Antes);
+                sb.AppendLine($"// Después (portable, vía {s.Interfaz} inyectada):");
+                sb.AppendLine(s.Despues);
+                sb.AppendLine("```");
+                sb.AppendLine();
+            }
+        }
+
         if (crossRefs.Count > 0)
         {
             sb.AppendLine("## Referencias cruzadas a resolver (introducir abstracción)");
@@ -484,9 +579,179 @@ public sealed class ProjectSplitter
             foreach (var r in crossRefs) sb.AppendLine($"- {r}");
             sb.AppendLine();
         }
-        sb.AppendLine("## Acciones manuales pendientes");
+
+        sb.AppendLine("## Aislamiento por SO en el propio código (alternativa a los seams)");
+        sb.AppendLine("Para casos puntuales puedes aislar por SO sin crear una interfaz (ver `Portabilidad/EjemploPorSistemaOperativo.cs`):");
+        sb.AppendLine();
+        sb.AppendLine("```csharp");
+        sb.AppendLine("if (OperatingSystem.IsWindows()) { /* API de Windows */ } else { /* alternativa portable */ }");
+        sb.AppendLine("// o en compilación condicional (net8.0-windows define el símbolo WINDOWS):");
+        sb.AppendLine("#if WINDOWS");
+        sb.AppendLine("    // solo Windows");
+        sb.AppendLine("#else");
+        sb.AppendLine("    // no-Windows (a cargo de otro equipo)");
+        sb.AppendLine("#endif");
+        sb.AppendLine("```");
+        sb.AppendLine();
+
+        sb.AppendLine("## Otras acciones");
         sb.AppendLine();
         foreach (var m in manual) sb.AppendLine($"- {m}");
+        sb.AppendLine();
+
+        sb.AppendLine("## Checklist final");
+        sb.AppendLine($"- [ ] `{multiName}` compila sin dependencias de Windows.");
+        sb.AppendLine($"- [ ] `{winName}` compila.");
+        if (seams.Count > 0) sb.AppendLine("- [ ] Seams registrados por inyección de dependencias.");
+        sb.AppendLine("- [ ] El núcleo usa las interfaces, no la API de Windows directamente.");
+        sb.AppendLine("- [ ] Pruebas superadas.");
+
         File.WriteAllText(path, sb.ToString());
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Scaffolding de SEAMS: interfaz portable (Multi) + implementacion Windows real (proyecto Windows).
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>Especificacion de un seam: interfaz portable e implementacion Windows para una categoria.</summary>
+    private sealed record SeamSpec(
+        string Categoria, string Titulo, string Interfaz, string ImplClase,
+        string InterfaceMembers, string ImplUsings, string ImplBody, string? Package,
+        string QueCambiar, string Antes, string Despues);
+
+    private static readonly Dictionary<string, SeamSpec> Seams = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Registry"] = new("Registry", "Registro de Windows -> configuración portable", "ISettingsStore", "WindowsSettingsStore",
+            "        string? Get(string clave);\r\n        void Set(string clave, string valor);",
+            "using Microsoft.Win32;",
+            "        private const string Ruta = @\"HKEY_CURRENT_USER\\Software\\{winName}\";\r\n" +
+            "        public string? Get(string clave) => (string?)Registry.GetValue(Ruta, clave, defaultValue: null);\r\n" +
+            "        public void Set(string clave, string valor) => Registry.SetValue(Ruta, clave, valor);",
+            "    <PackageReference Include=\"Microsoft.Win32.Registry\" Version=\"5.0.0\" />",
+            "Sustituir las lecturas/escrituras del Registro por la interfaz `ISettingsStore` inyectada. La implementación no-Windows puede leer de `appsettings.json`/variables de entorno.",
+            "var ruta = (string?)Registry.GetValue(@\"HKCU\\Software\\MiApp\", \"Ruta\", null);",
+            "var ruta = settings.Get(\"Ruta\"); // settings: ISettingsStore"),
+
+        ["Identity"] = new("Identity", "Identidad de Windows -> abstracción de identidad", "IUserIdentity", "WindowsUserIdentity",
+            "        string CurrentUserName { get; }",
+            "using System.Security.Principal;",
+            "        public string CurrentUserName => WindowsIdentity.GetCurrent().Name;",
+            "    <PackageReference Include=\"System.Security.Principal.Windows\" Version=\"5.0.0\" />",
+            "Sustituir el uso de `WindowsIdentity` por `IUserIdentity`. En no-Windows se implementa con Kerberos/tokens/LDAP o el usuario de la petición.",
+            "var u = System.Security.Principal.WindowsIdentity.GetCurrent().Name;",
+            "var u = identity.CurrentUserName; // identity: IUserIdentity"),
+
+        ["Cryptography"] = new("Cryptography", "DPAPI -> protección de secretos portable", "ISecretProtector", "WindowsSecretProtector",
+            "        byte[] Protect(byte[] datos);\r\n        byte[] Unprotect(byte[] datos);",
+            "using System.Security.Cryptography;",
+            "        public byte[] Protect(byte[] datos) => ProtectedData.Protect(datos, optionalEntropy: null, DataProtectionScope.CurrentUser);\r\n" +
+            "        public byte[] Unprotect(byte[] datos) => ProtectedData.Unprotect(datos, optionalEntropy: null, DataProtectionScope.CurrentUser);",
+            "    <PackageReference Include=\"System.Security.Cryptography.ProtectedData\" Version=\"8.0.0\" />",
+            "Sustituir DPAPI por `ISecretProtector`. IMPORTANTE: lo cifrado con DPAPI no se puede descifrar fuera de Windows; la implementación no-Windows debe usar AES con clave de un gestor de secretos (planificar re-cifrado).",
+            "var prot = ProtectedData.Protect(datos, null, DataProtectionScope.CurrentUser);",
+            "var prot = protector.Protect(datos); // protector: ISecretProtector"),
+
+        ["EventLog"] = new("EventLog", "Visor de eventos -> logging portable", "IAppEventLog", "WindowsEventLog",
+            "        void Write(string mensaje);",
+            "using System.Diagnostics;",
+            "        public void Write(string mensaje)\r\n        {\r\n" +
+            "            using var log = new EventLog(\"Application\") { Source = \"Application\" };\r\n" +
+            "            log.WriteEntry(mensaje, EventLogEntryType.Information);\r\n        }",
+            "    <PackageReference Include=\"System.Diagnostics.EventLog\" Version=\"8.0.0\" />",
+            "Sustituir el Visor de eventos por `IAppEventLog` (o directamente por `ILogger` de Microsoft.Extensions.Logging, portable).",
+            "new EventLog(\"Application\").WriteEntry(\"msg\");",
+            "logger.Write(\"msg\"); // logger: IAppEventLog"),
+
+        ["Threading"] = new("Threading", "Sincronización entre procesos -> abstracción de bloqueo", "IInterProcessLock", "WindowsInterProcessLock",
+            "        System.IDisposable Acquire(string nombre);",
+            "using System.Threading;",
+            "        public System.IDisposable Acquire(string nombre)\r\n        {\r\n" +
+            "            var mutex = new Mutex(initiallyOwned: false, @\"Global\\\" + nombre);\r\n" +
+            "            mutex.WaitOne();\r\n            return new Liberacion(mutex);\r\n        }\r\n\r\n" +
+            "        private sealed class Liberacion : System.IDisposable\r\n        {\r\n" +
+            "            private readonly Mutex _mutex;\r\n            public Liberacion(Mutex mutex) => _mutex = mutex;\r\n" +
+            "            public void Dispose() { _mutex.ReleaseMutex(); _mutex.Dispose(); }\r\n        }",
+            null,
+            "Sustituir los mutex/semáforos con nombre por `IInterProcessLock`. Los semáforos con nombre no son portables; en no-Windows se implementa con file lock/socket/named pipe.",
+            "var m = new Mutex(false, @\"Global\\MiApp\"); m.WaitOne();",
+            "using var _ = ipcLock.Acquire(\"MiApp\"); // ipcLock: IInterProcessLock"),
+
+        ["WMI"] = new("WMI", "WMI -> información del sistema portable", "ISystemInfo", "WindowsSystemInfo",
+            "        string OsDescription { get; }",
+            "using System.Runtime.InteropServices;",
+            "        // Para datos que hoy solo da WMI, anade el paquete System.Management y consultalo aqui.\r\n" +
+            "        public string OsDescription => RuntimeInformation.OSDescription;",
+            null,
+            "Sustituir las consultas WMI por `ISystemInfo`. Parte de la información ya la da `RuntimeInformation` (portable); lo específico de WMI se implementa aquí en Windows.",
+            "var os = new ManagementObjectSearcher(\"SELECT * FROM Win32_OperatingSystem\");",
+            "var os = systemInfo.OsDescription; // systemInfo: ISystemInfo"),
+    };
+
+    private static string BuildSeamInterface(SeamSpec s, string multiNs)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [SCAFFOLD generado] Seam portable (interfaz). El nucleo depende de esto, NO de la API de Windows.");
+        sb.AppendLine($"namespace {multiNs}");
+        sb.AppendLine("{");
+        sb.AppendLine($"    /// <summary>{s.Titulo}</summary>");
+        sb.AppendLine($"    public interface {s.Interfaz}");
+        sb.AppendLine("    {");
+        sb.AppendLine(s.InterfaceMembers);
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    private static string BuildSeamWindowsImpl(SeamSpec s, string multiNs, string winNs, string winName)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [SCAFFOLD generado] Implementacion Windows del seam. Compila en net8.0-windows.");
+        if (!string.IsNullOrEmpty(s.ImplUsings)) sb.AppendLine(s.ImplUsings);
+        sb.AppendLine($"using {multiNs};");
+        sb.AppendLine($"namespace {winNs}");
+        sb.AppendLine("{");
+        sb.AppendLine($"    /// <summary>Implementacion Windows de {s.Interfaz}.</summary>");
+        sb.AppendLine($"    public sealed class {s.ImplClase} : {s.Interfaz}");
+        sb.AppendLine("    {");
+        sb.AppendLine(s.ImplBody.Replace("{winName}", winName));
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    private static string BuildConditionalExample(string winNs)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [SCAFFOLD generado] Aislamiento por SISTEMA OPERATIVO en el propio codigo (alternativa a los");
+        sb.AppendLine("// seams para casos puntuales). Muestra dos tecnicas: guarda en tiempo de ejecucion y #if.");
+        sb.AppendLine($"namespace {winNs}");
+        sb.AppendLine("{");
+        sb.AppendLine("    internal static class EjemploPorSistemaOperativo");
+        sb.AppendLine("    {");
+        sb.AppendLine("        // Tecnica 1: guarda en tiempo de ejecucion (un unico binario para todos los SO).");
+        sb.AppendLine("        public static string CarpetaDeDatos() =>");
+        sb.AppendLine("            System.OperatingSystem.IsWindows()");
+        sb.AppendLine("                ? System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData)");
+        sb.AppendLine("                : System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData);");
+        sb.AppendLine();
+        sb.AppendLine("        // Tecnica 2: compilacion condicional. El TFM net8.0-windows define el simbolo WINDOWS.");
+        sb.AppendLine("        public static string Plataforma()");
+        sb.AppendLine("        {");
+        sb.AppendLine("#if WINDOWS");
+        sb.AppendLine("            return \"codigo especifico de Windows (solo se compila en net8.0-windows)\";");
+        sb.AppendLine("#else");
+        sb.AppendLine("            return \"implementacion no-Windows (a cargo de otro equipo)\";");
+        sb.AppendLine("#endif");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    /// <summary>Escribe un fichero .cs generado con UTF-8 + BOM (para que cualquier compilador lea bien los acentos).</summary>
+    private static void WriteCsFile(string path, string content)
+    {
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
     }
 }
