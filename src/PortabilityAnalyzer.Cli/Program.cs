@@ -125,9 +125,24 @@ internal static class Program
             {
                 var splitBaseDir = Path.Combine(reportDir, "proyectos-separados");
                 Directory.CreateDirectory(splitBaseDir);
-                foreach (var (pname, pdir) in new ProjectDiscovery().GetProjects(options.InputPath))
+
+                var proyectos = new ProjectDiscovery().GetProjects(options.InputPath);
+                var separables = proyectos.Where(p => roles.IsSeparable(p.Name)).Select(p => p.Name).ToList();
+                Log.Information("Proyectos descubiertos ({N}): {Proyectos}", proyectos.Count, string.Join(", ", proyectos.Select(p => p.Name)));
+                if (separables.Count == 0)
+                    Log.Warning("Ningun proyecto coincide con los roles separables (divisiblePorUI / obligatorioMultiplataforma / separables). " +
+                                "Revisa que los NOMBRES del fichero de roles coincidan con los nombres de proyecto listados arriba. No se generaran proyectos separados.");
+                else
+                    Log.Information("Proyectos a separar: {Separables}", string.Join(", ", separables));
+
+                foreach (var (pname, pdir) in proyectos)
                 {
-                    if (!roles.IsSeparable(pname) || !Directory.Exists(pdir)) continue;
+                    if (!roles.IsSeparable(pname)) continue;
+                    if (!Directory.Exists(pdir))
+                    {
+                        Log.Warning("No se puede separar {Proj}: no existe su carpeta de proyecto '{Dir}'.", pname, pdir);
+                        continue;
+                    }
                     try
                     {
                         var r = new ProjectSplitter().Split(pname, pdir, sourceFindings, splitBaseDir);
@@ -135,7 +150,7 @@ internal static class Program
                         Log.Information("Split de {Proj}: {Multi} ({P} ficheros) + {Win} ({W} ficheros) en {Dir}",
                             pname, r.MultiProject, r.PortableFiles, r.WindowsProject, r.WindowsFiles, splitBaseDir);
                     }
-                    catch (Exception ex) { Log.Warning(ex, "No se pudo dividir {Proj}", pname); }
+                    catch (Exception ex) { Log.Warning(ex, "No se pudo dividir {Proj}: {Error}", pname, ex.Message); }
                 }
             }
 
