@@ -95,19 +95,24 @@ internal static class Program
 
             // Roles de proyecto (opcional): API obligatoria, no modificables, divisibles por UI.
             var roles = new ProjectRoles();
-            if (options.RolesPath is not null && File.Exists(options.RolesPath))
+            if (options.RolesPath is null)
+                Log.Information("Sin fichero de roles (--roles): no se generaran proyectos separados.");
+            else if (!File.Exists(options.RolesPath))
+                Log.Warning("No se encuentra el fichero de roles '{Path}': no se generaran proyectos separados.", options.RolesPath);
+            else
             {
                 try
                 {
                     roles = System.Text.Json.JsonSerializer.Deserialize<ProjectRoles>(
                         File.ReadAllText(options.RolesPath),
                         new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new ProjectRoles();
-                    Log.Information("Roles de proyecto: {O} obligatorios, {N} no modificables, {D} divisibles por UI",
-                        roles.ObligatorioMultiplataforma.Count, roles.NoModificables.Count, roles.DivisiblePorUI.Count);
+                    static string L(IReadOnlyList<string> xs) => xs.Count == 0 ? "(vacio)" : string.Join(", ", xs);
+                    Log.Information("Roles cargados de {Path} -> obligatorioMultiplataforma: [{O}]; divisiblePorUI: [{D}]; separables: [{S}]; noModificables: [{N}]",
+                        options.RolesPath, L(roles.ObligatorioMultiplataforma), L(roles.DivisiblePorUI), L(roles.Separables), L(roles.NoModificables));
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning(ex, "No se pudieron cargar los roles de {Path}", options.RolesPath);
+                    Log.Warning(ex, "No se pudieron cargar los roles de {Path}: {Error}", options.RolesPath, ex.Message);
                 }
             }
 
