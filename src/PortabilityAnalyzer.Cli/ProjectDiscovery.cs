@@ -35,6 +35,10 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
         "<ProjectReference\\s+[^>]*?Include\\s*=\\s*\"([^\"]+)\"",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex TargetFrameworkElement = new(
+        "<TargetFrameworks?>\\s*([^<]+?)\\s*</TargetFrameworks?>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>Devuelve true si la ruta apunta a una solucion o proyecto que este descubridor maneja.</summary>
     public static bool Handles(string path) =>
         path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) ||
@@ -111,13 +115,16 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
             nameByPath[System.IO.Path.GetFullPath(c)] = ResolveAssemblyName(c);
 
         // Dependencias: proyecto -> proyectos que referencia DENTRO de la solucion (las externas se ignoran).
+        // Ademas, el TargetFramework(s) de cada proyecto para mostrarlo en el informe.
         var deps = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var tfmByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in csprojPaths)
         {
             var name = nameByPath[System.IO.Path.GetFullPath(c)];
             var dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(c))!;
+            var text = File.ReadAllText(c);
             var set = deps.TryGetValue(name, out var existing) ? existing : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (Match m in ProjectReferenceElement.Matches(File.ReadAllText(c)))
+            foreach (Match m in ProjectReferenceElement.Matches(text))
             {
                 var relRef = m.Groups[1].Value.Replace('\\', System.IO.Path.DirectorySeparatorChar);
                 var refFull = System.IO.Path.GetFullPath(System.IO.Path.Combine(dir, relRef));
@@ -126,13 +133,16 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
                     set.Add(refName);
             }
             deps[name] = set;
+
+            var tfmMatch = TargetFrameworkElement.Match(text);
+            tfmByName[name] = tfmMatch.Success ? tfmMatch.Groups[1].Value.Trim().Replace(";", ", ") : "(sin especificar)";
         }
 
-        return TopologicalBuildOrder(deps);
+        return TopologicalBuildOrder(deps, tfmByName);
     }
 
     /// <summary>Ordena por niveles (Kahn) el grafo de dependencias; lo que quede en ciclo se reporta aparte.</summary>
-    private static BuildOrder TopologicalBuildOrder(Dictionary<string, HashSet<string>> deps)
+    private static BuildOrder TopologicalBuildOrder(Dictionary<string, HashSet<string>> deps, Dictionary<string, string> tfmByName)
     {
         // Dependientes inversos: para cada d, quienes dependen de d.
         var dependents = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -165,7 +175,8 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
             .OrderBy(n => level[n]).ThenBy(n => n, StringComparer.OrdinalIgnoreCase)
             .Select(n => new BuildOrderStep(
                 level[n], n,
-                deps[n].Where(deps.ContainsKey).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList()))
+                deps[n].Where(deps.ContainsKey).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                tfmByName.TryGetValue(n, out var tfm) ? tfm : "(sin especificar)"))
             .ToList();
 
         return new BuildOrder(steps, cycle.Count > 0, cycle);

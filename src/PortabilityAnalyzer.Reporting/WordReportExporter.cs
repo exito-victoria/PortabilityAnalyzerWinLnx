@@ -314,11 +314,12 @@ public sealed class WordReportExporter : IReportExporter
             (i++).ToString(),
             s.Level.ToString(),
             s.Project,
+            s.TargetFramework,
             s.DependsOn.Count == 0 ? "— (sin dependencias internas)" : string.Join(", ", s.DependsOn)
         });
         b.Append(BuildTable(
-            new[] { "#", "Nivel", "Proyecto", "Depende de" },
-            new[] { 0.6, 0.9, 3.0, 4.0 },
+            new[] { "#", "Nivel", "Proyecto", "Target Framework", "Depende de" },
+            new[] { 0.5, 0.8, 2.6, 1.9, 3.2 },
             rows));
 
         if (bo.HasCycle)

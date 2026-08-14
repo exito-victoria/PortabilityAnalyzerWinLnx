@@ -4,8 +4,9 @@ namespace PortabilityAnalyzer.Core;
 /// Un paso del orden de compilacion de la solucion. <see cref="Level"/> agrupa los proyectos que se
 /// pueden compilar en paralelo (mismo nivel = sin dependencias entre si); dentro de un nivel se ordenan
 /// por nombre. <see cref="DependsOn"/> son las referencias de proyecto directas (dentro de la solucion).
+/// <see cref="TargetFramework"/> es el valor de &lt;TargetFramework(s)&gt; del .csproj.
 /// </summary>
-public sealed record BuildOrderStep(int Level, string Project, IReadOnlyList<string> DependsOn);
+public sealed record BuildOrderStep(int Level, string Project, IReadOnlyList<string> DependsOn, string TargetFramework);
 
 /// <summary>
 /// Orden de compilacion resuelto por topologia de <c>ProjectReference</c>. Si hay un ciclo de

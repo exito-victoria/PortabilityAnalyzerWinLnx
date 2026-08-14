@@ -255,13 +255,13 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
         sb.AppendLine("> Orden derivado de las referencias de proyecto (`ProjectReference`): cada proyecto se compila **después** de aquellos a los que referencia. Los proyectos del **mismo nivel** no dependen entre sí y podrían compilarse en paralelo.");
         sb.AppendLine();
-        sb.AppendLine("| # | Nivel | Proyecto | Depende de |");
-        sb.AppendLine("|---|-------|----------|------------|");
+        sb.AppendLine("| # | Nivel | Proyecto | Target Framework | Depende de |");
+        sb.AppendLine("|---|-------|----------|------------------|------------|");
         var i = 1;
         foreach (var s in bo.Steps)
         {
             var dep = s.DependsOn.Count == 0 ? "— (sin dependencias internas)" : string.Join(", ", s.DependsOn);
-            sb.AppendLine($"| {i++} | {s.Level} | {Cell(s.Project)} | {Cell(dep)} |");
+            sb.AppendLine($"| {i++} | {s.Level} | {Cell(s.Project)} | {Cell(s.TargetFramework)} | {Cell(dep)} |");
         }
         sb.AppendLine();
 
