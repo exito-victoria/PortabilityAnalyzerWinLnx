@@ -230,10 +230,11 @@ public sealed class ExecutiveWordExporter : IReportExporter
             "obligatorios. La implementación de la plataforma no-Windows queda preparada tras las interfaces, para que otro " +
             "equipo la desarrolle."));
         b.Append(Para(
-            "Qué es un «seam» (costura): el punto de extensión —una interfaz— por el que el núcleo portable llama a una " +
-            "capacidad que depende del sistema operativo, sin conocer su implementación. Cada plataforma (Windows, y en el " +
-            "futuro otras) aporta su propia implementación de esa interfaz; así el núcleo se mantiene portable y lo específico " +
-            "de cada SO queda encapsulado y sustituible."));
+            "Un seam (o punto de unión/corte) no es propiamente una capa física de la aplicación, sino un lugar en el código " +
+            "donde puedes alterar el comportamiento del programa sin modificar el código fuente de ese lugar, el punto de " +
+            "extensión —una interfaz— por el que el núcleo portable llama a una capacidad que depende del sistema operativo, " +
+            "sin conocer su implementación. Cada plataforma (Windows, y en el futuro otras) aporta su propia implementación de " +
+            "esa interfaz; así el núcleo se mantiene portable y lo específico de cada SO queda encapsulado y sustituible."));
     }
 
     private static string CategoriaTexto(string cat) => cat switch
