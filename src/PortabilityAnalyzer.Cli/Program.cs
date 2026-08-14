@@ -172,7 +172,13 @@ internal static class Program
                 SourceFindings = sourceFindings,
                 Roles = roles,
                 SplitResults = splitResults,
-                BuildOrder = buildOrder
+                BuildOrder = buildOrder,
+                SourceName = ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)
+                    ? Path.GetFileNameWithoutExtension(options.InputPath)
+                    : Path.GetFileNameWithoutExtension(options.OutputPath),
+                ProjectNames = ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)
+                    ? new ProjectDiscovery().GetProjects(options.InputPath).Select(p => p.Name).ToList()
+                    : new List<string>()
             };
 
             // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico

@@ -14,7 +14,8 @@ public sealed record ArchitecturePlan(
     IReadOnlyList<string> RoleNotes,
     bool HasUi,
     EffortEstimate TotalWithTesting,
-    int Blockers);
+    int Blockers,
+    string? WorkedExample);
 
 /// <summary>
 /// Deriva del informe una arquitectura destino PORTABLE-FIRST: un nucleo net8.0 multiplataforma lo mas
@@ -50,11 +51,16 @@ public static class ArchitectureRecommendation
             .Distinct()
             .ToList();
 
+        // Cada reemplazo indica el equivalente multiplataforma SUGERIDO y el PORQUE en lenguaje sencillo.
         var replacements = confirmed
             .Where(f => f.EstrategiaSeparacion == SeparationStrategy.ReemplazarDependencia && !string.IsNullOrEmpty(f.Evidencia))
             .Select(f => ShortName(f.Evidencia!))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(src => TargetFor(src) is { } tgt ? $"{src} -> {tgt}" : $"{src} (buscar equivalente multiplataforma)")
+            .Select(src =>
+            {
+                var tgt = TargetFor(src) ?? "buscar un equivalente multiplataforma gestionado";
+                return $"{src} -> {tgt}. Por qué: {WhyFor(src).TrimEnd('.')}";
+            })
             .Take(12)
             .ToList();
 
@@ -85,8 +91,8 @@ public static class ArchitectureRecommendation
         if (abstractions.Count > 0)
             steps.Add($"Aislar lo que hoy exige Windows tras interfaces en {baseName}.Abstractions e inyectarlas por DI (seam): {string.Join("; ", abstractions)}.");
         if (replacements.Count > 0)
-            steps.Add($"Reemplazar las dependencias no portables por su equivalente multiplataforma " +
-                      $"(el detalle y los pasos están en 'Alternativa portable / multiplataforma' y 'Pasos de remediación' de cada dependencia): {string.Join("; ", replacements)}.");
+            steps.Add($"Sustituir cada dependencia no portable por el equivalente multiplataforma sugerido (con el porqué; " +
+                      $"el detalle y los pasos están en 'Alternativa portable / multiplataforma' y 'Pasos de remediación', y hay ejemplos de código en el apéndice): {string.Join(" | ", replacements)}.");
         steps.Add($"Implementar en {baseName}.Platform.Windows solo la parte obligatoriamente Windows de cada abstracción; alternativamente, aislarla en el propio código con OperatingSystem.IsWindows() / #if.");
         steps.Add($"Dejar preparado el seam: la implementación NO-Windows de las abstracciones queda pendiente y a cargo de otro equipo (este análisis no la desarrolla ni prescribe la plataforma destino).");
         if (hasUi)
@@ -97,7 +103,60 @@ public static class ArchitectureRecommendation
 
         var totalWithTesting = report.CostByBucket.Aggregate(EffortEstimate.Zero, (a, b) => a.Add(b.Effort));
 
-        return new ArchitecturePlan(projects, abstractions, replacements, steps, roleNotes, hasUi, totalWithTesting, report.BlockerCount);
+        return new ArchitecturePlan(projects, abstractions, replacements, steps, roleNotes, hasUi, totalWithTesting,
+            report.BlockerCount, BuildWorkedExample(report, baseName));
+    }
+
+    /// <summary>Ejemplo practico, con datos reales del proyecto, de como quedaria resuelto un caso tipico.</summary>
+    private static string? BuildWorkedExample(AnalysisReport report, string baseName)
+    {
+        // Categoria mas frecuente en el codigo fuente (mas concreto) y un hallazgo representativo.
+        var rep = report.SourceFindings
+            .GroupBy(f => f.Categoria, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count())
+            .FirstOrDefault()?
+            .OrderBy(f => string.IsNullOrEmpty(f.Clase) ? 1 : 0)
+            .FirstOrDefault();
+        if (rep is null) return null;
+
+        var clase = string.IsNullOrEmpty(rep.Clase) ? "la clase afectada" : $"la clase '{rep.Clase}'";
+        var sym = string.IsNullOrEmpty(rep.Symbol) ? "una API de Windows" : $"'{rep.Symbol}'";
+        var loc = $"{rep.File}:{rep.Line}";
+
+        return rep.Categoria.ToUpperInvariant() switch
+        {
+            "UI" =>
+                $"Ejemplo práctico (caso UI). En {loc}, {clase} usa {sym} (interfaz de usuario de Windows). " +
+                $"Cómo queda resuelto: (1) se mueve la lógica y los ViewModels de {clase} a {baseName}.Core (portable, sin WPF/WinForms); " +
+                $"(2) la ventana/controles ({sym}) quedan solo en el proyecto Windows ({baseName}.App.Windows); " +
+                $"(3) donde el núcleo necesite mostrar algo al usuario, se llama a una interfaz (p. ej. INotificador) que en Windows muestra el diálogo y cuya versión no-Windows se deja preparada. Resultado: el núcleo compila sin depender de la UI de Windows.",
+            "DATABASE" =>
+                $"Ejemplo práctico (caso datos). En {loc}, {clase} usa {sym} (cliente de base de datos atado a Windows). " +
+                $"Cómo queda resuelto: se cambia el paquete por Oracle.ManagedDataAccess.Core (gestionado y portable); la API es casi idéntica, solo hay que revisar la cadena de conexión. El código de {clase} apenas cambia y pasa a compilar en cualquier SO.",
+            "REGISTRY" =>
+                $"Ejemplo práctico (caso configuración). En {loc}, {clase} lee del Registro de Windows con {sym}. " +
+                $"Cómo queda resuelto: (1) se define una interfaz ISettingsStore (el «seam») en {baseName}.Abstractions; (2) {clase} pasa a leer de ISettingsStore en vez del Registro; (3) en Windows se implementa con el Registro y, de forma portable, con appsettings.json/variables de entorno. El núcleo deja de depender del Registro.",
+            _ =>
+                $"Ejemplo práctico. En {loc}, {clase} usa {sym}, que solo funciona en Windows. " +
+                $"Cómo queda resuelto: (1) se mueve la lógica de {clase} a {baseName}.Core; (2) el uso de {sym} se sustituye por una interfaz (el «seam») en {baseName}.Abstractions; (3) la implementación con {sym} queda en {baseName}.Platform.Windows y la versión no-Windows se deja preparada tras la interfaz. Así el núcleo compila sin ataduras de SO y lo específico de Windows queda encapsulado y sustituible."
+        };
+    }
+
+    /// <summary>Explicacion sencilla del porque una dependencia no es portable.</summary>
+    private static string WhyFor(string src)
+    {
+        var s = src.ToLowerInvariant();
+        if (s.Contains("oracleclient") || s.Contains("oracle.dataaccess")) return "el cliente clásico usa código nativo de Windows; la variante gestionada (.Core) es 100% portable.";
+        if (s.Contains("sqlclient")) return "System.Data.SqlClient quedó atado a Windows; Microsoft.Data.SqlClient es su sucesor multiplataforma.";
+        if (s.Contains("gdi32") || s.Contains("system.drawing")) return "es una librería de gráficos NATIVA de Windows; en multiplataforma se usa una librería de gráficos gestionada (SkiaSharp/ImageSharp).";
+        if (s.Contains("user32") || s.Contains("kernel32") || s.Contains("advapi32") || s.EndsWith(".dll")) return "es una DLL nativa del sistema Windows (P/Invoke); no existe en otros SO, hay que usar la API gestionada equivalente o aislarla por SO.";
+        if (s.Contains("eventlog")) return "el Visor de eventos es exclusivo de Windows; un framework de logging portable escribe a consola/fichero.";
+        if (s.Contains("performancecounter")) return "los contadores de rendimiento son de Windows; EventCounters/Metrics son la alternativa portable.";
+        if (s.Contains("messaging")) return "MSMQ es de Windows; una cola multiplataforma (RabbitMQ/Service Bus) cumple la misma función.";
+        if (s.Contains("servicemodel")) return "WCF clásico es de Windows; CoreWCF o gRPC/ASP.NET Core son portables.";
+        if (s.Contains("directoryservices")) return "la integración nativa con Active Directory es de Windows; un cliente LDAP portable la sustituye.";
+        if (s.Contains("protecteddata")) return "DPAPI es exclusivo de Windows; se cifra con AES y una clave gestionada externamente.";
+        return "no es portable a otros sistemas operativos; se sustituye por una alternativa gestionada multiplataforma o se aísla por SO.";
     }
 
     /// <summary>Notas segun el rol configurado de cada proyecto (API obligatoria, no modificable, divisible).</summary>
@@ -142,6 +201,7 @@ public static class ArchitectureRecommendation
         ("Oracle.ManagedDataAccess", "Oracle.ManagedDataAccess.Core"),
         ("System.Data.SqlClient", "Microsoft.Data.SqlClient"),
         ("System.Drawing.Common", "SkiaSharp o ImageSharp"),
+        ("gdi32", "SkiaSharp o ImageSharp (gráficos multiplataforma)"),
         ("System.Diagnostics.EventLog", "Serilog / Microsoft.Extensions.Logging (fichero/syslog)"),
         ("System.Diagnostics.PerformanceCounter", "EventCounters / System.Diagnostics.Metrics"),
         ("System.Messaging", "RabbitMQ o Azure Service Bus"),

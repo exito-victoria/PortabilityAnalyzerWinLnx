@@ -103,48 +103,72 @@ public sealed class ExecutiveWordExporter : IReportExporter
     {
         if (managed.Count == 0) return;
         b.Append(Heading("Estimación por proyecto", 1));
-        b.Append(Para("Esfuerzo estimado (horas) por proyecto/ensamblado. Los de proveedores externos (no modificables) " +
-                      "no imputan esfuerzo a nuestro total: su adaptación corresponde al proveedor."));
+        b.Append(Para("Esfuerzo estimado (horas) diferenciando los PROYECTOS propios (código nuestro) de las DLL de " +
+                      "TERCEROS (de un autor/proveedor externo). Los componentes de terceros no modificables no imputan " +
+                      "esfuerzo a nuestro total: su adaptación corresponde a su autor."));
 
+        var projectSet = report.ProjectNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var rows = new List<string[]>();
         foreach (var a in managed.OrderByDescending(a => a.Effort.Media))
         {
             var role = report.Roles.RoleOf(a.Classification.Name);
-            var tipo = role switch
-            {
-                ProjectRole.NoModificable => "Tercero (no modificable)",
-                ProjectRole.ObligatorioMultiplataforma => "Obligatorio multiplataforma",
-                ProjectRole.DivisiblePorUI => "Divisible (UI)",
-                _ => a.IsThirdParty ? "Tercero" : "Propio"
-            };
+            // Es un PROYECTO propio si su nombre coincide con un proyecto de la solucion o esta marcado con un rol propio.
+            var esProyecto = projectSet.Contains(a.Classification.Name)
+                             || role is ProjectRole.ObligatorioMultiplataforma or ProjectRole.DivisiblePorUI;
+            var clase = esProyecto ? "Proyecto" : "DLL de terceros";
+            var origen = esProyecto
+                ? role switch
+                {
+                    ProjectRole.ObligatorioMultiplataforma => "Propio (obligatorio multiplataforma)",
+                    ProjectRole.DivisiblePorUI => "Propio (divisible por UI)",
+                    _ => "Propio"
+                }
+                : role == ProjectRole.NoModificable ? $"{AuthorOf(a.Classification.Path)} (no modificable)" : AuthorOf(a.Classification.Path);
             var blockers = a.ConfirmedFindings().Count(f => f.EsBloqueante);
             var esfuerzo = role == ProjectRole.NoModificable
                 ? "no imputado"
                 : $"{a.Effort.Optimista:0.#} / {a.Effort.Media:0.#} / {a.Effort.Pesimista:0.#}";
-            rows.Add(new[] { a.Classification.Name, tipo, a.MaxSeverity.ToString(), blockers.ToString(), esfuerzo });
+            rows.Add(new[] { a.Classification.Name, clase, origen, a.MaxSeverity.ToString(), blockers.ToString(), esfuerzo });
         }
         var e = report.TotalEffort;
-        rows.Add(new[] { "TOTAL (imputado)", "", "", ourBlockers.ToString(),
+        rows.Add(new[] { "TOTAL (imputado)", "", "", "", ourBlockers.ToString(),
             $"{e.Optimista:0.#} / {e.Media:0.#} / {e.Pesimista:0.#}" });
 
         b.Append(BuildTable(
-            new[] { "Proyecto", "Tipo", "Severidad", "Bloq.", "Esfuerzo O / M / P (h)" },
-            new[] { 3.0, 2.2, 1.4, 0.9, 2.4 },
+            new[] { "Proyecto / DLL", "Clase", "Autor / rol", "Sev.", "Bloq.", "Esfuerzo O / M / P (h)" },
+            new[] { 2.5, 1.3, 2.5, 1.0, 0.8, 2.2 },
             rows));
+    }
+
+    /// <summary>Autor/empresa de una DLL a partir de sus metadatos (AssemblyCompany / version del fichero).</summary>
+    private static string AuthorOf(string assemblyPath)
+    {
+        try
+        {
+            if (File.Exists(assemblyPath))
+            {
+                var company = System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath).CompanyName?.Trim();
+                if (!string.IsNullOrWhiteSpace(company)) return company!;
+            }
+        }
+        catch { /* sin metadatos legibles */ }
+        return "Tercero (autor desconocido)";
     }
 
     private static void AppendCostePorBloque(Body b, AnalysisReport report)
     {
         if (report.CostByBucket.Count == 0) return;
         b.Append(Heading("Coste por bloque de trabajo", 1));
+        b.Append(Para("Se muestra primero la estimación optimista (escenario favorable, mejor caso) y después la " +
+                      "más probable (media). El % es el peso de cada bloque sobre el total."));
         var grand = report.CostByBucket.Aggregate(EffortEstimate.Zero, (a, x) => a.Add(x.Effort));
         var rows = report.CostByBucket.Select(x =>
         {
             var pct = grand.Media > 0 ? x.Effort.Media / grand.Media * 100 : 0;
-            return new[] { CostBuckets.Text(x.Bucket), $"{x.Effort.Media:0.#}", $"{pct:0} %" };
+            return new[] { CostBuckets.Text(x.Bucket), $"{x.Effort.Optimista:0.#}", $"{x.Effort.Media:0.#}", $"{pct:0} %" };
         }).ToList();
-        rows.Add(new[] { "Total (con Pruebas y CI)", $"{grand.Media:0.#}", "100 %" });
-        b.Append(BuildTable(new[] { "Bloque", "Media (h)", "%" }, new[] { 4.0, 1.4, 1.0 }, rows));
+        rows.Add(new[] { "Total (con Pruebas y CI)", $"{grand.Optimista:0.#}", $"{grand.Media:0.#}", "100 %" });
+        b.Append(BuildTable(new[] { "Bloque", "Optimista (h)", "Media (h)", "%" }, new[] { 3.6, 1.3, 1.3, 0.9 }, rows));
     }
 
     private static void AppendHallazgosPrincipales(Body b, AnalysisReport report)
@@ -180,11 +204,20 @@ public sealed class ExecutiveWordExporter : IReportExporter
 
         b.Append(Heading("Restricciones (componentes de terceros)", 1));
         b.Append(Para(
-            $"Los siguientes componentes son de proveedores externos y NO se pueden migrar ni modificar por nuestra parte " +
-            $"(es responsabilidad del proveedor); su esfuerzo no se imputa a nuestro total: {string.Join(", ", noMod)}. " +
+            "Los siguientes componentes son de proveedores externos y NO se pueden migrar ni modificar por nuestra parte " +
+            "(es responsabilidad de su autor); su esfuerzo no se imputa a nuestro total:"));
+        foreach (var name in noMod)
+            b.Append(Bullet($"{name} — autor: {AuthorOfByName(managed, name)}."));
+        b.Append(Para(
             "Para ejecutarlos en el entorno destino existen vías viables (versión multiplataforma del proveedor, " +
             "aislarlos en un host Windows con un contrato de servicio, capa de compatibilidad o sustitución), detalladas " +
             "en el informe general."));
+    }
+
+    private static string AuthorOfByName(List<AssemblyAnalysisResult> managed, string name)
+    {
+        var a = managed.FirstOrDefault(x => string.Equals(x.Classification.Name, name, StringComparison.OrdinalIgnoreCase));
+        return a is null ? "desconocido" : AuthorOf(a.Classification.Path);
     }
 
     private static void AppendRecomendacion(Body b)
@@ -192,9 +225,15 @@ public sealed class ExecutiveWordExporter : IReportExporter
         b.Append(Heading("Recomendación", 1));
         b.Append(Para(
             "Adoptar una arquitectura portable-first: un núcleo .NET 8 multiplataforma lo más grande posible, una capa de " +
-            "interfaces (seam) para lo que dependa del sistema operativo, y una única pieza aislada con lo obligatoriamente " +
-            "Windows. Priorizar la resolución de los puntos bloqueantes y de los proyectos marcados como obligatorios. La " +
-            "implementación de la plataforma no-Windows queda preparada tras las interfaces, para que otro equipo la desarrolle."));
+            "interfaces (el «seam») para lo que dependa del sistema operativo, y una única pieza aislada con lo " +
+            "obligatoriamente Windows. Priorizar la resolución de los puntos bloqueantes y de los proyectos marcados como " +
+            "obligatorios. La implementación de la plataforma no-Windows queda preparada tras las interfaces, para que otro " +
+            "equipo la desarrolle."));
+        b.Append(Para(
+            "Qué es un «seam» (costura): el punto de extensión —una interfaz— por el que el núcleo portable llama a una " +
+            "capacidad que depende del sistema operativo, sin conocer su implementación. Cada plataforma (Windows, y en el " +
+            "futuro otras) aporta su propia implementación de esa interfaz; así el núcleo se mantiene portable y lo específico " +
+            "de cada SO queda encapsulado y sustituible."));
     }
 
     private static string CategoriaTexto(string cat) => cat switch
@@ -247,6 +286,14 @@ public sealed class ExecutiveWordExporter : IReportExporter
 
     private static Paragraph Heading(string text, int level) =>
         Para(text, bold: true, sizeHalfPt: level == 1 ? 28 : 24, style: level == 1 ? "Heading1" : "Heading2");
+
+    /// <summary>Parrafo con vineta (lista simple, con sangria).</summary>
+    private static Paragraph Bullet(string text)
+    {
+        var run = new Run(new Text("•  " + text) { Space = SpaceProcessingModeValues.Preserve });
+        var paraProps = new ParagraphProperties(new Indentation { Left = "360" });
+        return new Paragraph(paraProps, run);
+    }
 
     private static Paragraph Para(string text, bool bold = false, int? sizeHalfPt = null, string? style = null)
     {

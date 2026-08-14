@@ -37,6 +37,8 @@ public sealed class WordReportExporter : IReportExporter
         var b = mainPart.Document.AppendChild(new Body());
 
         b.Append(Para("Informe de análisis multiplataforma (.NET 8) - portabilidad de Windows", bold: true, sizeHalfPt: 36));
+        if (!string.IsNullOrWhiteSpace(report.SourceName))
+            b.Append(Para($"Proyecto: {report.SourceName}", bold: true, sizeHalfPt: 26));
         b.Append(Para($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}"));
         b.Append(Para($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}"));
         b.Append(Para($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h"));
@@ -143,6 +145,7 @@ public sealed class WordReportExporter : IReportExporter
 
         b.Append(Para("Arquitectura destino recomendada y plan de migración", bold: true, sizeHalfPt: 28));
         b.Append(Para($"Objetivo: núcleo .NET 8 portable lo más grande posible + lo obligatoriamente Windows aislado (Platform.Windows / #if), dejando el resto preparado para otro equipo. Esfuerzo total estimado (con Pruebas y CI): {plan.TotalWithTesting.Media:0.#} h (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}."));
+        b.Append(Para("Qué es un «seam» (costura): el punto de extensión —una interfaz— por el que el núcleo portable llama a una capacidad que depende del sistema operativo, sin conocer su implementación. Cada plataforma aporta su propia implementación de esa interfaz; así el núcleo se mantiene portable y lo específico de cada SO queda encapsulado y sustituible."));
 
         if (plan.RoleNotes.Count > 0)
         {
@@ -167,6 +170,8 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para("Plan de migración", bold: true, sizeHalfPt: 24));
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             b.Append(Para($"{i + 1}. {plan.MigrationSteps[i]}"));
+        if (!string.IsNullOrWhiteSpace(plan.WorkedExample))
+            b.Append(Para(plan.WorkedExample!));
         b.Append(Para(string.Empty));
     }
 

@@ -13,6 +13,8 @@ public sealed class MarkdownReportExporter : IReportExporter
         var sb = new StringBuilder();
         sb.AppendLine("# Informe de análisis multiplataforma (.NET 8) - portabilidad de Windows");
         sb.AppendLine();
+        if (!string.IsNullOrWhiteSpace(report.SourceName))
+            sb.AppendLine($"**Proyecto: {report.SourceName}**  ");
         sb.AppendLine($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}  ");
         sb.AppendLine($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}  ");
         sb.AppendLine($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h");
@@ -76,6 +78,8 @@ public sealed class MarkdownReportExporter : IReportExporter
         sb.AppendLine();
         sb.AppendLine($"Objetivo: **núcleo .NET 8 portable** lo más grande posible + **lo obligatoriamente Windows aislado** (Platform.Windows / `#if`), dejando el resto **preparado para otro equipo**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
         sb.AppendLine();
+        sb.AppendLine("> **Qué es un «seam» (costura):** el punto de extensión —una interfaz— por el que el núcleo portable llama a una capacidad que depende del sistema operativo, sin conocer su implementación. Cada plataforma aporta su propia implementación de esa interfaz; así el núcleo se mantiene portable y lo específico de cada SO queda encapsulado y sustituible.");
+        sb.AppendLine();
 
         if (plan.RoleNotes.Count > 0)
         {
@@ -108,6 +112,11 @@ public sealed class MarkdownReportExporter : IReportExporter
         for (int i = 0; i < plan.MigrationSteps.Count; i++)
             sb.AppendLine($"{i + 1}. {plan.MigrationSteps[i]}");
         sb.AppendLine();
+        if (!string.IsNullOrWhiteSpace(plan.WorkedExample))
+        {
+            sb.AppendLine($"> {plan.WorkedExample}");
+            sb.AppendLine();
+        }
     }
 
     /// <summary>Scaffold de división de los proyectos con rol divisiblePorUI (dos proyectos generados).</summary>

@@ -69,4 +69,12 @@ public sealed record AnalysisReport
 
     /// <summary>Orden correcto de compilacion de los proyectos (topologia de ProjectReference).</summary>
     public BuildOrder BuildOrder { get; init; } = BuildOrder.Empty;
+
+    /// <summary>Nombre de la solucion (.sln) o proyecto (.csproj) analizado, sin extension. Se muestra en
+    /// la cabecera de todos los informes.</summary>
+    public string SourceName { get; init; } = string.Empty;
+
+    /// <summary>Nombres de los proyectos propios (first-party) de la solucion. Sirve para distinguir en los
+    /// informes entre PROYECTO propio y DLL de terceros.</summary>
+    public IReadOnlyList<string> ProjectNames { get; init; } = new List<string>();
 }

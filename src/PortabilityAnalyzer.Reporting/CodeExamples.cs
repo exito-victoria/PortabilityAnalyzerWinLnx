@@ -1,4 +1,4 @@
-namespace PortabilityAnalyzer.Reporting;
+﻿namespace PortabilityAnalyzer.Reporting;
 
 /// <summary>Ejemplo de codigo para hacer PORTABLE una categoria de dependencia hoy atada a Windows.</summary>
 public sealed record CodeExample(string Categoria, string Titulo, string Codigo, string Nota);
@@ -14,7 +14,7 @@ public static class CodeExamples
 {
     private static readonly CodeExample[] All =
     {
-        new("Registry", "Registro de Windows -> configuracion portable",
+        new("Registry", "Registro de Windows -> configuración portable",
             """
             // Solo Windows:
             using Microsoft.Win32;
@@ -34,7 +34,7 @@ public static class CodeExamples
             """,
             "OperatingSystem.IsWindows() evita PlatformNotSupportedException al ejecutar fuera de Windows."),
 
-        new("PInvoke", "P/Invoke -> API gestionada o compilacion condicional",
+        new("PInvoke", "P/Invoke -> API gestionada o compilación condicional",
             """
             // Solo Windows (P/Invoke a kernel32):
             [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
@@ -52,9 +52,9 @@ public static class CodeExamples
             #endif
             }
             """,
-            "El TFM net8.0-windows define WINDOWS; el nucleo portable (net8.0) compila la rama #else."),
+            "El TFM net8.0-windows define WINDOWS; el núcleo portable (net8.0) compila la rama #else."),
 
-        new("Identity", "Identidad de Windows -> abstraccion (seam)",
+        new("Identity", "Identidad de Windows -> abstracción (el «seam»)",
             """
             // Solo Windows:
             var nombre = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
@@ -69,7 +69,7 @@ public static class CodeExamples
             }
             // La implementacion no-Windows de IUserIdentity queda como seam, a cargo de otro equipo.
             """,
-            "La logica de negocio depende solo de IUserIdentity; Windows aporta su implementacion (DI). El seam no-Windows se deja preparado."),
+            "La lógica de negocio depende solo de IUserIdentity; Windows aporta su implementación (DI). El «seam» no-Windows se deja preparado."),
 
         new("Database", "Oracle: System.Data.OracleClient -> Oracle.ManagedDataAccess.Core",
             """
@@ -84,7 +84,7 @@ public static class CodeExamples
             """,
             "Oracle.ManagedDataAccess.Core es 100% gestionado y portable (no depende del SO)."),
 
-        new("UI", "UI (WPF/WinForms) -> nucleo portable + UI Windows aislada",
+        new("UI", "UI (WPF/WinForms) -> núcleo portable + UI Windows aislada",
             """
             // WPF/WinForms estan atados a Windows. Estructura PORTABLE-FIRST:
             //   MiApp.Core         (net8.0)          -> logica y ViewModels (portable, sin UI)
@@ -94,7 +94,7 @@ public static class CodeExamples
             // La UI no-Windows NO se desarrolla aqui: queda preparada para que otro equipo la aporte
             // reutilizando los ViewModels del nucleo.
             """,
-            "Separar UI de logica deja el nucleo portable y reutilizable; la UI no-Windows queda como trabajo de otro equipo."),
+            "Separar UI de lógica deja el núcleo portable y reutilizable; la UI no-Windows queda como trabajo de otro equipo."),
 
         new("Cryptography", "DPAPI -> cifrado gestionado portable",
             """
@@ -118,9 +118,9 @@ public static class CodeExamples
             ILogger log = loggerFactory.CreateLogger("MiApp");
             log.LogInformation("msg");
             """,
-            "Un unico framework de logging portable sustituye al Visor de eventos de Windows."),
+            "Un único framework de logging portable sustituye al Visor de eventos de Windows."),
 
-        new("WMI", "WMI -> abstraccion (seam)",
+        new("WMI", "WMI -> abstracción (el «seam»)",
             """
             // Solo Windows (WMI):
             using System.Management;
@@ -132,7 +132,7 @@ public static class CodeExamples
             // Los datos que hoy solo da WMI se aislan tras ISystemInfo; su implementacion no-Windows,
             // si se necesita, queda como seam a cargo de otro equipo.
             """,
-            "WMI es exclusivo de Windows; se aisla tras una interfaz y parte de la informacion ya la da RuntimeInformation (portable).")
+            "WMI es exclusivo de Windows; se aísla tras una interfaz y parte de la información ya la da RuntimeInformation (portable).")
     };
 
     /// <summary>Ejemplos correspondientes a las categorias indicadas (en el orden de la tabla interna).</summary>
