@@ -91,10 +91,20 @@ public sealed class ProjectSplitter
             CopyWithHeader(f.Abs, System.IO.Path.Combine(multiDir, f.Rel),
                 $"[SCAFFOLD generado] Proyecto {multiName} (net8.0, multiplataforma). Namespace: {multiRootNs ?? multiName}. Revisar SPLIT-NOTES-{baseName}.md.",
                 multiTransform);
+        // En el proyecto Windows, aislar los METODOS que usan API exclusiva de Windows con #if WINDOWS y
+        // dejar el hueco no-Windows indicado (#else con stub). Asi la separacion es a nivel de metodo.
+        var projFindings = findings.Where(f => string.Equals(f.Project, projectName, StringComparison.OrdinalIgnoreCase)).ToList();
         foreach (var f in winFiles)
+        {
+            var fileLines = projFindings
+                .Where(x => string.Equals(x.File, f.Rel, StringComparison.OrdinalIgnoreCase))
+                .Select(x => x.Line)
+                .ToHashSet();
+            Func<string, string>? winTransform = fileLines.Count > 0 ? c => IsolateWindowsMethods(c, fileLines) : null;
             CopyWithHeader(f.Abs, System.IO.Path.Combine(winDir, f.Rel),
-                $"[SCAFFOLD generado] Proyecto {winName} (net8.0-windows). Revisar SPLIT-NOTES-{baseName}.md.",
-                null);
+                $"[SCAFFOLD generado] Proyecto {winName} (net8.0-windows). Metodos Windows aislados con #if WINDOWS. Revisar SPLIT-NOTES-{baseName}.md.",
+                winTransform);
+        }
 
         // El contenido (xaml/resx/recursos) se copia VERBATIM (sin cabecera // ni rebase de namespace).
         foreach (var f in multiContent) CopyRaw(f.Abs, System.IO.Path.Combine(multiDir, f.Rel));
@@ -160,6 +170,7 @@ public sealed class ProjectSplitter
             manual.Add($"Contenido copiado (xaml/resx/recursos): {winContent.Count} a {winName} y {multiContent.Count} a {multiName}. El XAML y su code-behind van juntos a {winName}; revisar los recursos huerfanos clasificados por extension.");
         if (winContent.Concat(multiContent).Any(f => f.Rel.EndsWith(".settings", StringComparison.OrdinalIgnoreCase)))
             manual.Add("Se detecto Properties/Settings (proyecto clasico): el Settings.Designer.cs requiere el paquete System.Configuration.ConfigurationManager; anadirlo o migrar la configuracion a IConfiguration (appsettings.json).");
+        manual.Add($"Separacion por metodo: en {winName} los metodos que usan API de Windows se han envuelto en #if WINDOWS con un stub #else (hueco no-Windows). Completar la rama #else para Linux u otros SO, o extraer el metodo tras un seam.");
         manual.Add($"Revisar las PackageReference de {multiName}: eliminar las que sean solo-Windows.");
         manual.Add($"Si el proyecto original referenciaba a OTROS proyectos de la solucion (ProjectReference), anadir esas referencias a {multiName}/{winName} segun donde encaje cada uso (el scaffold solo enlaza {winName} -> {multiName}).");
         manual.Add("El scaffold es un punto de partida: compilar cada proyecto y resolver los errores de referencias que queden.");
@@ -211,7 +222,59 @@ public sealed class ProjectSplitter
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);
         var content = File.ReadAllText(source);
         if (transform is not null) content = transform(content);
-        File.WriteAllText(target, $"// {header}{Environment.NewLine}{content}");
+        // UTF-8 con BOM: no degradar los acentos del fichero original al copiarlo/transformarlo.
+        File.WriteAllText(target, $"// {header}{Environment.NewLine}{content}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+    }
+
+    /// <summary>Aisla los METODOS que usan API de Windows: envuelve su cuerpo en <c>#if WINDOWS ... #else
+    /// (stub no-Windows) ... #endif</c>. Un metodo se considera Windows si alguna linea con hallazgo cae
+    /// dentro de su rango. Solo toca metodos (no propiedades/constructores) y ante cualquier fallo de
+    /// parseo deja el fichero intacto.</summary>
+    private static string IsolateWindowsMethods(string content, HashSet<int> findingLines)
+    {
+        try
+        {
+            var root = CSharpSyntaxTree.ParseText(content).GetRoot();
+            var targets = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .Where(m => (m.Body is not null || m.ExpressionBody is not null) && MethodSpanHasLine(m, findingLines))
+                .ToList();
+            if (targets.Count == 0) return content;
+            var newRoot = root.ReplaceNodes(targets, (orig, _) => WrapWindowsMethod(orig));
+            return newRoot.ToFullString();
+        }
+        catch { return content; }
+    }
+
+    private static bool MethodSpanHasLine(MethodDeclarationSyntax m, HashSet<int> lines)
+    {
+        var span = m.GetLocation().GetLineSpan();
+        int start = span.StartLinePosition.Line + 1, end = span.EndLinePosition.Line + 1;
+        foreach (var l in lines) if (l >= start && l <= end) return true;
+        return false;
+    }
+
+    private static MethodDeclarationSyntax WrapWindowsMethod(MethodDeclarationSyntax m)
+    {
+        string inner;
+        if (m.Body is not null)
+            inner = string.Concat(m.Body.Statements.Select(s => s.ToFullString()));
+        else
+        {
+            var expr = m.ExpressionBody!.Expression.ToFullString().Trim();
+            var isVoid = m.ReturnType is PredefinedTypeSyntax pts && pts.Keyword.IsKind(SyntaxKind.VoidKeyword);
+            inner = isVoid ? expr + ";" : "return " + expr + ";";
+        }
+
+        var name = m.Identifier.Text;
+        var text =
+            "{\r\n#if WINDOWS\r\n" + inner + "\r\n#else\r\n" +
+            "            // TODO: implementacion no-Windows (Linux u otros SO) de " + name + "().\r\n" +
+            "            throw new System.PlatformNotSupportedException(\"" + name + " usa API exclusiva de Windows; falta la implementacion no-Windows.\");\r\n" +
+            "#endif\r\n}";
+        if (SyntaxFactory.ParseStatement(text) is not BlockSyntax block) return m;
+        return m.WithBody(block)
+                .WithExpressionBody(null)
+                .WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.None));
     }
 
     /// <summary>Copia un fichero de contenido (xaml/resx/imagen/config...) tal cual, sin modificarlo.</summary>
