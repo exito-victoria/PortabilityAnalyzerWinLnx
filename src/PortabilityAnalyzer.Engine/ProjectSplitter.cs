@@ -62,12 +62,34 @@ public sealed class ProjectSplitter
         // ViewModels que heredan de una base que usa System.Windows/Dispatcher no se quedan en Multi.
         var winExpanded = ExpandWindowsSet(codeFiles, winRelFiles);
 
-        var winFiles = codeFiles.Where(f => winExpanded.Contains(f.Rel)).ToList();
+        var winFilesAll = codeFiles.Where(f => winExpanded.Contains(f.Rel)).ToList();
         var portableFiles = codeFiles.Where(f => !winExpanded.Contains(f.Rel)).ToList();
+
+        // UMBRAL DE PORTABILIDAD: un fichero mayormente portable con POCOS metodos Windows (<= 2) y SIN
+        // acoplamiento de clase a Windows (no hereda Form/Window, no es UI, no tiene usos Windows a nivel de
+        // clase) se QUEDA en el nucleo (Multi) con esos metodos aislados por #if WINDOWS. Ademas se extrae
+        // una interfaz (seam) por clase para la separacion limpia. Asi el nucleo portable es lo mas grande posible.
+        const int MaxWindowsMethodsToStayPortable = 2;
+        var projFindings = findings.Where(f => string.Equals(f.Project, projectName, StringComparison.OrdinalIgnoreCase)).ToList();
+        var winDeclaredAll = DeclaredTypeNamesByFile(winFilesAll);
+        var winFiles = new List<(string Abs, string Rel)>();
+        var mixedInMulti = new List<(string Abs, string Rel)>();
+        var mixedClasses = new List<MixedClass>();
+        foreach (var f in winFilesAll)
+        {
+            var fileFindings = projFindings.Where(x => string.Equals(x.File, f.Rel, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (TryStayPortable(f, fileFindings, MaxWindowsMethodsToStayPortable, winDeclaredAll, out var classes))
+            {
+                mixedInMulti.Add(f);
+                mixedClasses.AddRange(classes);
+            }
+            else winFiles.Add(f);
+        }
+        var multiCode = portableFiles.Concat(mixedInMulti).ToList();
 
         // Clasificar el contenido: el XAML es Windows; el resto sigue al .cs de su mismo nombre (p. ej.
         // Form1.resx con Form1.cs) y, si es huerfano, se decide por extension (UI -> Windows; resto -> Multi).
-        var (winContent, multiContent) = ClassifyContent(contentFiles, winFiles, portableFiles);
+        var (winContent, multiContent) = ClassifyContent(contentFiles, winFiles, multiCode);
         var hasXaml = winContent.Any(f => f.Rel.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase));
 
         // SALVAGUARDA: nunca recrear (borrar) una carpeta de salida que colisione con el proyecto original
@@ -87,20 +109,32 @@ public sealed class ProjectSplitter
         Func<string, string>? multiTransform =
             (rootNs is null || multiRootNs is null) ? null : c => RebaseNamespace(c, rootNs, multiRootNs);
 
+        // Ficheros PORTABLES puros -> Multi (solo rebase de namespace).
         foreach (var f in portableFiles)
             CopyWithHeader(f.Abs, System.IO.Path.Combine(multiDir, f.Rel),
                 $"[SCAFFOLD generado] Proyecto {multiName} (net8.0, multiplataforma). Namespace: {multiRootNs ?? multiName}. Revisar SPLIT-NOTES-{baseName}.md.",
                 multiTransform);
-        // En el proyecto Windows, aislar los METODOS que usan API exclusiva de Windows con #if WINDOWS y
-        // dejar el hueco no-Windows indicado (#else con stub). Asi la separacion es a nivel de metodo.
-        var projFindings = findings.Where(f => string.Equals(f.Project, projectName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // Ficheros MIXTOS (mayormente portables) -> se quedan en el nucleo Multi con sus metodos Windows
+        // aislados por #if WINDOWS (el Multi pasa a multi-target para que la rama #if compile en Windows).
+        foreach (var f in mixedInMulti)
+        {
+            var lines = LinesOf(projFindings, f.Rel);
+            Func<string, string> tr = c =>
+            {
+                var isolated = IsolateWindowsMethods(c, lines);
+                return multiTransform is null ? isolated : multiTransform(isolated);
+            };
+            CopyWithHeader(f.Abs, System.IO.Path.Combine(multiDir, f.Rel),
+                $"[SCAFFOLD generado] Proyecto {multiName} (nucleo). Fichero MIXTO: metodos Windows aislados con #if WINDOWS; ver la separacion por INTERFAZ propuesta en SPLIT-NOTES-{baseName}.md.",
+                tr);
+        }
+
+        // Ficheros WINDOWS -> proyecto Windows, con los metodos Windows aislados por #if WINDOWS.
         foreach (var f in winFiles)
         {
-            var fileLines = projFindings
-                .Where(x => string.Equals(x.File, f.Rel, StringComparison.OrdinalIgnoreCase))
-                .Select(x => x.Line)
-                .ToHashSet();
-            Func<string, string>? winTransform = fileLines.Count > 0 ? c => IsolateWindowsMethods(c, fileLines) : null;
+            var lines = LinesOf(projFindings, f.Rel);
+            Func<string, string>? winTransform = lines.Count > 0 ? c => IsolateWindowsMethods(c, lines) : null;
             CopyWithHeader(f.Abs, System.IO.Path.Combine(winDir, f.Rel),
                 $"[SCAFFOLD generado] Proyecto {winName} (net8.0-windows). Metodos Windows aislados con #if WINDOWS. Revisar SPLIT-NOTES-{baseName}.md.",
                 winTransform);
@@ -142,12 +176,30 @@ public sealed class ProjectSplitter
         // Ejemplo de aislamiento por SO EN EL PROPIO CODIGO (compilacion condicional), ya implementado.
         WriteCsFile(System.IO.Path.Combine(winDir, "Portabilidad", "EjemploPorSistemaOperativo.cs"), BuildConditionalExample(seamWinNs));
 
-        var multiHasAsmInfo = portableFiles.Any(f => IsAssemblyInfo(f.Rel));
+        // Interfaz (seam) POR CLASE para los ficheros MIXTOS que se quedan en el nucleo: encapsula sus
+        // metodos Windows. Se genera la interfaz en el Multi y una implementacion Windows (stub) a rellenar.
+        var mixedCats = projFindings
+            .Where(x => mixedInMulti.Any(m => string.Equals(m.Rel, x.File, StringComparison.OrdinalIgnoreCase)))
+            .Select(x => x.Categoria).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var mixedWinPackages = mixedCats
+            .Select(c => Seams.TryGetValue(c, out var s) ? s.Package : null)
+            .Where(p => p is not null).Select(p => p!).Distinct().ToList();
+        foreach (var mc in mixedClasses)
+        {
+            WriteCsFile(System.IO.Path.Combine(multiDir, "Seams", $"I{mc.ClassName}Native.cs"), BuildClassInterface(mc, seamMultiNs));
+            WriteCsFile(System.IO.Path.Combine(winDir, "Seams", $"Windows{mc.ClassName}Native.cs"), BuildClassWindowsStub(mc, seamMultiNs, seamWinNs));
+        }
+
+        var multiHasAsmInfo = multiCode.Any(f => IsAssemblyInfo(f.Rel));
         var winHasAsmInfo = winFiles.Any(f => IsAssemblyInfo(f.Rel));
         var winPackages = packages.Concat(seamPackages).ToList();
 
-        WriteCsproj(System.IO.Path.Combine(multiDir, multiName + ".csproj"), "net8.0", packages, false, false, null,
-            outputType: null, generateAssemblyInfo: !multiHasAsmInfo);
+        // Si hay ficheros mixtos en el nucleo, el Multi pasa a MULTI-TARGET para que su rama #if WINDOWS
+        // compile en Windows, con los paquetes Windows necesarios SOLO para net8.0-windows.
+        var multiTfm = mixedInMulti.Count > 0 ? "net8.0;net8.0-windows" : "net8.0";
+        WriteCsproj(System.IO.Path.Combine(multiDir, multiName + ".csproj"), multiTfm, packages, false, false, null,
+            outputType: null, generateAssemblyInfo: !multiHasAsmInfo,
+            windowsOnlyPackages: mixedInMulti.Count > 0 ? mixedWinPackages : null);
         WriteCsproj(System.IO.Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", winPackages, useWpf, useWinForms,
             $"..\\{multiName}\\{multiName}.csproj", winOutputType, generateAssemblyInfo: !winHasAsmInfo);
 
@@ -155,29 +207,31 @@ public sealed class ProjectSplitter
         // se genera un GlobalUsings.cs en el proyecto Windows con esos namespaces.
         var movedNamespaces = rootNs is null ? new List<string>()
             : RebasedNamespacesOf(portableFiles, rootNs, multiRootNs!);
-        if (generatedSeams.Count > 0 && !movedNamespaces.Contains(seamMultiNs)) movedNamespaces.Add(seamMultiNs);
+        if ((generatedSeams.Count > 0 || mixedClasses.Count > 0) && !movedNamespaces.Contains(seamMultiNs)) movedNamespaces.Add(seamMultiNs);
         if (movedNamespaces.Count > 0)
             WriteGlobalUsings(System.IO.Path.Combine(winDir, "GlobalUsings.cs"), movedNamespaces);
 
-        var crossRefs = FindCrossReferences(portableFiles, winFiles);
+        var crossRefs = FindCrossReferences(multiCode, winFiles);
 
         var manual = new List<string>();
         if (rootNs is not null)
             manual.Add($"Namespace separado: el proyecto {multiName} usa el namespace '{multiRootNs}' (el original '{rootNs}' se conserva en {winName}). Se ha generado GlobalUsings.cs en {winName} para resolver los tipos movidos; revisar referencias totalmente cualificadas que sigan usando '{rootNs}.'.");
+        if (mixedInMulti.Count > 0)
+            manual.Add($"{mixedInMulti.Count} fichero(s) MIXTO(s) se han quedado en el nucleo {multiName} (mayormente portables, <= {MaxWindowsMethodsToStayPortable} metodos Windows): sus metodos Windows estan aislados con #if WINDOWS y el Multi es multi-target (net8.0;net8.0-windows). La separacion por INTERFAZ recomendada esta detallada mas abajo.");
         if (crossRefs.Count > 0)
             manual.Add($"{crossRefs.Count} referencia(s) de codigo portable a tipos que quedaron en {winName} (Windows): introducir una interfaz/abstraccion en {multiName} e implementarla en {winName}.");
         if (winContent.Count > 0 || multiContent.Count > 0)
             manual.Add($"Contenido copiado (xaml/resx/recursos): {winContent.Count} a {winName} y {multiContent.Count} a {multiName}. El XAML y su code-behind van juntos a {winName}; revisar los recursos huerfanos clasificados por extension.");
         if (winContent.Concat(multiContent).Any(f => f.Rel.EndsWith(".settings", StringComparison.OrdinalIgnoreCase)))
             manual.Add("Se detecto Properties/Settings (proyecto clasico): el Settings.Designer.cs requiere el paquete System.Configuration.ConfigurationManager; anadirlo o migrar la configuracion a IConfiguration (appsettings.json).");
-        manual.Add($"Separacion por metodo: en {winName} los metodos que usan API de Windows se han envuelto en #if WINDOWS con un stub #else (hueco no-Windows). Completar la rama #else para Linux u otros SO, o extraer el metodo tras un seam.");
+        manual.Add($"Separacion por metodo: los metodos que usan API de Windows se han envuelto en #if WINDOWS con un stub #else (hueco no-Windows). Completar la rama #else para Linux u otros SO, o extraer el metodo tras un seam.");
         manual.Add($"Revisar las PackageReference de {multiName}: eliminar las que sean solo-Windows.");
         manual.Add($"Si el proyecto original referenciaba a OTROS proyectos de la solucion (ProjectReference), anadir esas referencias a {multiName}/{winName} segun donde encaje cada uso (el scaffold solo enlaza {winName} -> {multiName}).");
         manual.Add("El scaffold es un punto de partida: compilar cada proyecto y resolver los errores de referencias que queden.");
 
         WriteSplitNotes(System.IO.Path.Combine(outputDir, $"SPLIT-NOTES-{baseName}.md"),
-            projectName, multiName, winName, portableFiles.Count, winFiles.Count, crossRefs, manual,
-            generatedSeams, seamMultiNs, seamWinNs);
+            projectName, multiName, winName, multiCode.Count, winFiles.Count, crossRefs, manual,
+            generatedSeams, seamMultiNs, seamWinNs, mixedClasses);
 
         return new SplitResult
         {
@@ -185,7 +239,7 @@ public sealed class ProjectSplitter
             MultiProject = multiName,
             WindowsProject = winName,
             OutputDir = outputDir,
-            PortableFiles = portableFiles.Count,
+            PortableFiles = multiCode.Count,
             WindowsFiles = winFiles.Count,
             CrossReferences = crossRefs,
             ManualNotes = manual
@@ -353,6 +407,145 @@ public sealed class ProjectSplitter
         catch { return false; }
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // UMBRAL DE PORTABILIDAD: ficheros mixtos (mayormente portables) que se quedan en el nucleo (Multi).
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>Una clase mixta que se queda en el nucleo: sus metodos que usan API de Windows.</summary>
+    private sealed record MixedClass(string File, string ClassName, IReadOnlyList<MixedMethod> Methods);
+    private sealed record MixedMethod(string Name, string ReturnType, string ParamList, bool IsStatic);
+
+    /// <summary>Tipos base que acoplan una clase a Windows (WinForms/WPF): si se hereda de ellos, no es portable.</summary>
+    private static readonly HashSet<string> WindowsBaseTypes = new(StringComparer.Ordinal)
+    {
+        "Form", "Window", "UserControl", "Control", "Page", "Application", "DependencyObject",
+        "FrameworkElement", "ContentControl", "ContainerControl", "ScrollableControl", "CommonDialog",
+        "NativeWindow", "ApplicationContext"
+    };
+
+    private static HashSet<int> LinesOf(List<SourceFinding> projFindings, string rel) =>
+        projFindings.Where(x => string.Equals(x.File, rel, StringComparison.OrdinalIgnoreCase)).Select(x => x.Line).ToHashSet();
+
+    private static Dictionary<string, HashSet<string>> DeclaredTypeNamesByFile(List<(string Abs, string Rel)> files)
+    {
+        var map = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in files)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            try
+            {
+                var root = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
+                foreach (var t in root.DescendantNodes().OfType<TypeDeclarationSyntax>()) set.Add(t.Identifier.Text);
+            }
+            catch { /* ignorar */ }
+            map[f.Rel] = set;
+        }
+        return map;
+    }
+
+    /// <summary>Decide si un fichero Windows es en realidad MIXTO (mayormente portable, pocos metodos Windows,
+    /// sin acoplamiento de clase) y por tanto se queda en el nucleo. En tal caso devuelve sus clases mixtas.</summary>
+    private static bool TryStayPortable((string Abs, string Rel) f, List<SourceFinding> fileFindings, int max,
+        Dictionary<string, HashSet<string>> winDeclaredByFile, out List<MixedClass> classes)
+    {
+        classes = new List<MixedClass>();
+        try
+        {
+            if (f.Rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)) return false;
+            if (IsEntryPoint(f.Abs)) return false;
+            if (fileFindings.Any(x => string.Equals(x.Categoria, "UI", StringComparison.OrdinalIgnoreCase))) return false;
+
+            var root = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
+            var types = root.DescendantNodes().OfType<TypeDeclarationSyntax>().ToList();
+
+            // Acoplamiento de clase a Windows por herencia (Form/Window/...): no portable.
+            foreach (var t in types)
+                if (t.BaseList is not null)
+                    foreach (var bt in t.BaseList.Types)
+                        if (WindowsBaseTypes.Contains(BaseName(bt.Type))) return false;
+
+            // Clase parcial compartida con un fichero Windows: no separar (se queda en Windows).
+            var declaredHere = types.Select(t => t.Identifier.Text).ToHashSet(StringComparer.Ordinal);
+            foreach (var kv in winDeclaredByFile)
+                if (!string.Equals(kv.Key, f.Rel, StringComparison.OrdinalIgnoreCase) && kv.Value.Overlaps(declaredHere))
+                    return false;
+
+            var findingLines = fileFindings.Select(x => x.Line).ToHashSet();
+            var usingLines = root.DescendantNodes().OfType<UsingDirectiveSyntax>()
+                .Select(u => u.GetLocation().GetLineSpan().StartLinePosition.Line + 1).ToHashSet();
+
+            var methods = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .Where(m => m.Body is not null || m.ExpressionBody is not null).ToList();
+
+            // Hallazgos a nivel de CLASE (fuera de metodos y que no sean un using): acoplamiento -> no portable.
+            var spans = methods.Select(m => { var s = m.GetLocation().GetLineSpan(); return (Start: s.StartLinePosition.Line + 1, End: s.EndLinePosition.Line + 1); }).ToList();
+            bool InAnyMethod(int line) => spans.Any(sp => line >= sp.Start && line <= sp.End);
+            if (findingLines.Any(l => !InAnyMethod(l) && !usingLines.Contains(l))) return false;
+
+            var winMethods = methods.Where(m => MethodSpanHasLine(m, findingLines)).ToList();
+            if (winMethods.Count < 1 || winMethods.Count > max) return false;
+            if (winMethods.Count >= methods.Count) return false; // debe quedar codigo portable (el "resto")
+
+            foreach (var grp in winMethods.GroupBy(m => m.FirstAncestorOrSelf<TypeDeclarationSyntax>()?.Identifier.Text ?? "Clase"))
+            {
+                var mm = grp.Select(m => new MixedMethod(
+                    m.Identifier.Text, m.ReturnType.ToString().Trim(), m.ParameterList.ToString(),
+                    m.Modifiers.Any(x => x.IsKind(SyntaxKind.StaticKeyword)))).ToList();
+                classes.Add(new MixedClass(f.Rel, grp.Key, mm));
+            }
+            return true;
+        }
+        catch { classes = new List<MixedClass>(); return false; }
+    }
+
+    /// <summary>Interfaz (seam) por clase con la firma de sus metodos Windows (los de instancia).</summary>
+    private static string BuildClassInterface(MixedClass mc, string ns)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"// [SCAFFOLD generado] Interfaz (seam) por CLASE para separar los metodos Windows de {mc.ClassName}.");
+        sb.AppendLine("// El nucleo depende de esta interfaz; Windows aporta la implementacion (proyecto Windows).");
+        sb.AppendLine($"namespace {ns}");
+        sb.AppendLine("{");
+        sb.AppendLine($"    public interface I{mc.ClassName}Native");
+        sb.AppendLine("    {");
+        foreach (var m in mc.Methods.Where(x => !x.IsStatic))
+            sb.AppendLine($"        {m.ReturnType} {m.Name}{m.ParamList};");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    /// <summary>Implementacion Windows (stub) del seam por clase, lista para mover la logica Windows.</summary>
+    private static string BuildClassWindowsStub(MixedClass mc, string multiNs, string winNs)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"// [SCAFFOLD generado] Implementacion Windows del seam de {mc.ClassName}. Mover aqui la logica");
+        sb.AppendLine("// Windows de esos metodos (ver SPLIT-NOTES). El nucleo pasara a llamar a la interfaz.");
+        sb.AppendLine($"using {multiNs};");
+        sb.AppendLine($"namespace {winNs}");
+        sb.AppendLine("{");
+        sb.AppendLine($"    public sealed class Windows{mc.ClassName}Native : I{mc.ClassName}Native");
+        sb.AppendLine("    {");
+        foreach (var m in mc.Methods.Where(x => !x.IsStatic))
+        {
+            sb.AppendLine($"        public {m.ReturnType} {m.Name}{m.ParamList}");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            // TODO: mover aqui la implementacion Windows de {m.Name}.");
+            sb.AppendLine($"            throw new System.PlatformNotSupportedException(\"Implementar {m.Name} para Windows; dejar el hueco no-Windows para otro equipo.\");");
+            sb.AppendLine("        }");
+        }
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    /// <summary>Nombres de los parametros de una lista "(tipo a, tipo b)" -> "a, b" (para la llamada delegada).</summary>
+    private static string ArgNamesFrom(string paramList)
+    {
+        try { return string.Join(", ", SyntaxFactory.ParseParameterList(paramList).Parameters.Select(p => p.Identifier.Text)); }
+        catch { return string.Empty; }
+    }
+
     /// <summary>Namespace raiz mas frecuente entre los ficheros (primer segmento). Base para el rebase del Multi.</summary>
     private static string? DetectRootNamespace(List<(string Abs, string Rel)> allCs)
     {
@@ -435,12 +628,13 @@ public sealed class ProjectSplitter
         return (packages, useWpf, useWinForms, outputType);
     }
 
-    private static void WriteCsproj(string path, string tfm, IReadOnlyList<string> packages, bool useWpf, bool useWinForms, string? projectReference, string? outputType = null, bool generateAssemblyInfo = true)
+    private static void WriteCsproj(string path, string tfm, IReadOnlyList<string> packages, bool useWpf, bool useWinForms, string? projectReference, string? outputType = null, bool generateAssemblyInfo = true, IReadOnlyList<string>? windowsOnlyPackages = null)
     {
+        var multiTarget = tfm.Contains(';');
         var sb = new StringBuilder();
         sb.AppendLine("<Project Sdk=\"Microsoft.NET.Sdk\">");
         sb.AppendLine("  <PropertyGroup>");
-        sb.AppendLine($"    <TargetFramework>{tfm}</TargetFramework>");
+        sb.AppendLine(multiTarget ? $"    <TargetFrameworks>{tfm}</TargetFrameworks>" : $"    <TargetFramework>{tfm}</TargetFramework>");
         if (!string.IsNullOrWhiteSpace(outputType)) sb.AppendLine($"    <OutputType>{outputType}</OutputType>");
         sb.AppendLine("    <ImplicitUsings>enable</ImplicitUsings>");
         sb.AppendLine("    <Nullable>enable</Nullable>");
@@ -459,6 +653,13 @@ public sealed class ProjectSplitter
         {
             sb.AppendLine("  <ItemGroup>");
             foreach (var p in packages) sb.AppendLine($"    {p}");
+            sb.AppendLine("  </ItemGroup>");
+        }
+        // Paquetes que solo hacen falta en el target Windows (para la rama #if WINDOWS de los ficheros mixtos).
+        if (windowsOnlyPackages is { Count: > 0 })
+        {
+            sb.AppendLine("  <ItemGroup Condition=\"'$(TargetFramework)' == 'net8.0-windows'\">");
+            foreach (var p in windowsOnlyPackages) sb.AppendLine($"    {p}");
             sb.AppendLine("  </ItemGroup>");
         }
         sb.AppendLine("</Project>");
@@ -577,7 +778,7 @@ public sealed class ProjectSplitter
 
     private static void WriteSplitNotes(string path, string original, string multiName, string winName,
         int portable, int windows, IReadOnlyList<string> crossRefs, IReadOnlyList<string> manual,
-        IReadOnlyList<SeamSpec> seams, string seamMultiNs, string seamWinNs)
+        IReadOnlyList<SeamSpec> seams, string seamMultiNs, string seamWinNs, IReadOnlyList<MixedClass> mixedClasses)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# División de {original} — guía de finalización");
@@ -615,6 +816,52 @@ public sealed class ProjectSplitter
         }
         sb.AppendLine("6. **Prueba** cada proyecto.");
         sb.AppendLine();
+
+        if (mixedClasses.Count > 0)
+        {
+            sb.AppendLine("## Separación por interfaces de las clases MIXTAS (recomendado)");
+            sb.AppendLine();
+            sb.AppendLine($"Estas clases se han quedado en el núcleo `{multiName}` porque son **mayormente portables** y solo tienen **unos pocos métodos** que usan API de Windows. De momento esos métodos están **aislados con `#if WINDOWS`** (funciona: `{multiName}` es multi-target `net8.0;net8.0-windows`). Lo **recomendado** para el proyecto real es sustituir ese `#if` por una **interfaz (seam)**, ya generada para cada clase. Así el núcleo queda 100% portable y testeable, y lo específico de Windows vive en el proyecto Windows.");
+            sb.AppendLine();
+            sb.AppendLine($"Cómo hacerlo, para **cada clase** (interfaces en `{seamMultiNs}`, implementación Windows en `{seamWinNs}`):");
+            sb.AppendLine();
+            foreach (var mc in mixedClasses)
+            {
+                var methodsList = string.Join(", ", mc.Methods.Select(m => m.Name + "()"));
+                sb.AppendLine($"### Clase `{mc.ClassName}` (fichero `{mc.File}`)");
+                sb.AppendLine($"Métodos Windows detectados: **{methodsList}**. Interfaz generada: `I{mc.ClassName}Native`; implementación Windows: `Windows{mc.ClassName}Native`.");
+                sb.AppendLine();
+                sb.AppendLine("1. **Mueve la lógica Windows** de esos métodos a `Windows" + mc.ClassName + "Native` (proyecto Windows), rellenando los stubs generados.");
+                sb.AppendLine($"2. **Inyecta** `I{mc.ClassName}Native` en `{mc.ClassName}` (constructor) y **delega** en él, quitando el `#if WINDOWS`:");
+                sb.AppendLine();
+                sb.AppendLine("   ```csharp");
+                var first = mc.Methods.First(m => !m.IsStatic);
+                sb.AppendLine($"   // En el núcleo ({mc.ClassName}), inyecta la interfaz:");
+                sb.AppendLine($"   private readonly I{mc.ClassName}Native _native;");
+                sb.AppendLine($"   public {mc.ClassName}(I{mc.ClassName}Native native) => _native = native;");
+                sb.AppendLine();
+                sb.AppendLine("   // Antes (con #if WINDOWS dentro del método):");
+                sb.AppendLine($"   public {first.ReturnType} {first.Name}{first.ParamList}");
+                sb.AppendLine("   {");
+                sb.AppendLine("   #if WINDOWS");
+                sb.AppendLine("       /* ... llamada a la API de Windows ... */");
+                sb.AppendLine("   #else");
+                sb.AppendLine("       throw new PlatformNotSupportedException(...);");
+                sb.AppendLine("   #endif");
+                sb.AppendLine("   }");
+                sb.AppendLine();
+                sb.AppendLine("   // Después (delegando en la interfaz; el núcleo queda portable):");
+                var argNames = ArgNamesFrom(first.ParamList);
+                sb.AppendLine($"   public {first.ReturnType} {first.Name}{first.ParamList} => _native.{first.Name}({argNames});");
+                sb.AppendLine("   ```");
+                sb.AppendLine();
+                sb.AppendLine($"3. **Registra** la implementación por DI en el arranque: `services.AddSingleton<I{mc.ClassName}Native, Windows{mc.ClassName}Native>();`.");
+                sb.AppendLine($"4. La implementación **no-Windows** de `I{mc.ClassName}Native` queda preparada para otro equipo (otro `I{mc.ClassName}Native` para Linux u otros SO).");
+                if (mc.Methods.Any(m => m.IsStatic))
+                    sb.AppendLine($"> Nota: algún método Windows de `{mc.ClassName}` es **estático**; conviértelo a instancia o expón un método de instancia para poder aislarlo tras la interfaz.");
+                sb.AppendLine();
+            }
+        }
 
         if (seams.Count > 0)
         {
