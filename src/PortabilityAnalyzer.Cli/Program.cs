@@ -206,15 +206,23 @@ internal static class Program
             var single = options.Formats.Count == 1;
             foreach (var fmt in options.Formats)
             {
-                IReportExporter exporter = fmt switch
-                {
-                    "markdown" => new MarkdownReportExporter(),
-                    "word" => new WordReportExporter(),
-                    _ => new JsonReportExporter()
-                };
                 var path = single ? options.OutputPath : OutputPathFor(options.OutputPath, fmt);
-                exporter.Export(report, path);
-                Log.Information("Informe {Format} escrito en {Path}", fmt, path);
+                if (fmt == "word")
+                {
+                    // El informe general de Word se genera en ESPAÑOL e INGLÉS (informe.docx e informe_EN.docx).
+                    foreach (var lang in new[] { Lang.Es, Lang.En })
+                    {
+                        var langPath = lang == Lang.En ? WithSuffix(path, "_EN") : path;
+                        new WordReportExporter(lang).Export(report, langPath);
+                        Log.Information("Informe word ({Lang}) escrito en {Path}", lang, langPath);
+                    }
+                }
+                else
+                {
+                    IReportExporter exporter = fmt == "markdown" ? new MarkdownReportExporter() : new JsonReportExporter();
+                    exporter.Export(report, path);
+                    Log.Information("Informe {Format} escrito en {Path}", fmt, path);
+                }
             }
 
             // Informe EJECUTIVO (solo con --executive): se genera en ESPAÑOL e INGLÉS (Word) en la carpeta
@@ -255,5 +263,14 @@ internal static class Program
         var name = Path.GetFileNameWithoutExtension(basePath);
         var ext = format switch { "markdown" => ".md", "word" => ".docx", _ => ".json" };
         return Path.Combine(dir, name + ext);
+    }
+
+    /// <summary>Inserta un sufijo antes de la extension (informe.docx + "_EN" -> informe_EN.docx).</summary>
+    private static string WithSuffix(string path, string suffix)
+    {
+        var dir = Path.GetDirectoryName(path) ?? string.Empty;
+        var name = Path.GetFileNameWithoutExtension(path);
+        var ext = Path.GetExtension(path);
+        return Path.Combine(dir, name + suffix + ext);
     }
 }

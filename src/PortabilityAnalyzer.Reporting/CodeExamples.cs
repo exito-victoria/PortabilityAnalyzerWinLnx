@@ -135,10 +135,35 @@ public static class CodeExamples
             "WMI es exclusivo de Windows; se aísla tras una interfaz y parte de la información ya la da RuntimeInformation (portable).")
     };
 
-    /// <summary>Ejemplos correspondientes a las categorias indicadas (en el orden de la tabla interna).</summary>
-    public static IReadOnlyList<CodeExample> ForCategories(IEnumerable<string> categorias)
+    /// <summary>Titulo y nota en INGLES por categoria (el bloque de codigo es neutral y no se traduce).</summary>
+    private static readonly Dictionary<string, (string Titulo, string Nota)> En = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Registry"] = ("Windows Registry -> portable configuration",
+            "OperatingSystem.IsWindows() avoids PlatformNotSupportedException when running outside Windows."),
+        ["PInvoke"] = ("P/Invoke -> managed API or conditional compilation",
+            "The net8.0-windows TFM defines WINDOWS; the portable core (net8.0) compiles the #else branch."),
+        ["Identity"] = ("Windows identity -> abstraction (the \"seam\")",
+            "Business logic depends only on IUserIdentity; Windows provides its implementation (DI). The non-Windows seam is left ready."),
+        ["Database"] = ("Oracle: System.Data.OracleClient -> Oracle.ManagedDataAccess.Core",
+            "Oracle.ManagedDataAccess.Core is 100% managed and portable (no OS dependency)."),
+        ["UI"] = ("UI (WPF/WinForms) -> portable core + isolated Windows UI",
+            "Separating UI from logic keeps the core portable and reusable; the non-Windows UI is left for another team."),
+        ["Cryptography"] = ("DPAPI -> portable managed encryption",
+            "IMPORTANT: data already protected with DPAPI CANNOT be decrypted outside Windows; plan a re-encryption."),
+        ["EventLog"] = ("Event Viewer -> portable logging",
+            "A single portable logging framework replaces the Windows Event Viewer."),
+        ["WMI"] = ("WMI -> abstraction (the \"seam\")",
+            "WMI is Windows-only; it is isolated behind an interface and part of the info is already provided by RuntimeInformation (portable)."),
+    };
+
+    /// <summary>Ejemplos correspondientes a las categorias indicadas, en el idioma solicitado.</summary>
+    public static IReadOnlyList<CodeExample> ForCategories(IEnumerable<string> categorias, Lang lang = Lang.Es)
     {
         var set = categorias.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return All.Where(e => set.Contains(e.Categoria)).ToList();
+        return All.Where(e => set.Contains(e.Categoria))
+            .Select(e => lang == Lang.En && En.TryGetValue(e.Categoria, out var t)
+                ? e with { Titulo = t.Titulo, Nota = t.Nota }
+                : e)
+            .ToList();
     }
 }

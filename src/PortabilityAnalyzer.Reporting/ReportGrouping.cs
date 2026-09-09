@@ -27,25 +27,21 @@ public static class ReportGrouping
     }
 
     /// <summary>Texto legible de la estrategia de separacion multiplataforma.</summary>
-    public static string StrategyText(SeparationStrategy? s) => s switch
-    {
-        SeparationStrategy.Comun => "Común",
-        SeparationStrategy.AbstraerPorPlataforma => "Abstraer por plataforma",
-        SeparationStrategy.ReemplazarDependencia => "Reemplazar dependencia",
-        SeparationStrategy.RedisenoUI => "Rediseño UI",
-        _ => "—"
-    };
+    public static string StrategyText(SeparationStrategy? s, Lang lang = Lang.Es) => Loc.Strategy(s, lang);
 
     /// <summary>Pasos de remediacion numerados en una sola linea (o "—" si no hay).</summary>
     public static string StepsInline(IReadOnlyList<string> pasos) =>
         pasos.Count == 0 ? "—" : string.Join(" ", pasos.Select((p, i) => $"{i + 1}) {p}"));
 
-    /// <summary>Alternativa Linux; si la libreria es comun y hay nota, la incorpora.</summary>
-    public static string AlternativeWithNote(Finding f)
+    /// <summary>Alternativa portable; si la libreria es comun y hay nota, la incorpora.</summary>
+    public static string AlternativeWithNote(Finding f, Lang lang = Lang.Es)
     {
         var text = f.AlternativaLinux ?? string.Empty;
         if (f.EstrategiaSeparacion == SeparationStrategy.Comun && !string.IsNullOrWhiteSpace(f.NotaComun))
-            text = string.IsNullOrWhiteSpace(text) ? $"Común: {f.NotaComun}" : $"{text} (Común: {f.NotaComun})";
+        {
+            var comun = Loc.T(lang, "Común", "Common");
+            text = string.IsNullOrWhiteSpace(text) ? $"{comun}: {f.NotaComun}" : $"{text} ({comun}: {f.NotaComun})";
+        }
         return text;
     }
 }

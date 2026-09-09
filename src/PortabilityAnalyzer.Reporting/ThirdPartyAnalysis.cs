@@ -92,8 +92,10 @@ public static class ThirdPartyAnalysis
         return profiles.OrderByDescending(p => p.MaxSeverity).ThenByDescending(p => p.NativeDeps.Count).ToList();
     }
 
-    public static string DependencyKind(NativeDependency d) =>
-        d.IsWindowsSystem ? "Sistema Windows" : "Nativa de terceros (verificar disponibilidad multiplataforma)";
+    public static string DependencyKind(NativeDependency d, Lang lang = Lang.Es) =>
+        d.IsWindowsSystem
+            ? Loc.T(lang, "Sistema Windows", "Windows system")
+            : Loc.T(lang, "Nativa de terceros (verificar disponibilidad multiplataforma)", "Third-party native (check cross-platform availability)");
 
     /// <summary>Nombre concreto de la API/tipo Windows del hallazgo: prioriza la evidencia (tipo, atributo o
     /// API detectada); si falta, cae al tipo declarante y por ultimo a la regla.</summary>

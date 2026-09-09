@@ -97,7 +97,7 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
 
 ## Los tres informes
 
-- **General** (Markdown y Word): resumen, **coste por bloque**, **orden de compilación** (con Target Framework),
+- **General** (Markdown y **Word en español e inglés** — `informe.docx` e `informe_EN.docx`): resumen, **coste por bloque**, **orden de compilación** (con Target Framework),
   **recomendación de arquitectura** con un **ejemplo de migración** real y la definición de «seam»,
   **análisis de terceros**, **terceros no modificables** (restricción + opciones), **impacto por proyecto**
   (clases y ficheros afectados), **análisis de código fuente** (dónde y cómo corregir) y un **apéndice de
