@@ -33,15 +33,22 @@ public static class ReportGrouping
     public static string StepsInline(IReadOnlyList<string> pasos) =>
         pasos.Count == 0 ? "—" : string.Join(" ", pasos.Select((p, i) => $"{i + 1}) {p}"));
 
-    /// <summary>Alternativa portable; si la libreria es comun y hay nota, la incorpora.</summary>
+    /// <summary>Alternativa portable; si la libreria es comun y hay nota, la incorpora. En inglés usa los
+    /// campos *_En del catálogo cuando existen (si no, cae al texto español).</summary>
     public static string AlternativeWithNote(Finding f, Lang lang = Lang.Es)
     {
-        var text = f.AlternativaLinux ?? string.Empty;
-        if (f.EstrategiaSeparacion == SeparationStrategy.Comun && !string.IsNullOrWhiteSpace(f.NotaComun))
+        var text = (lang == Lang.En && !string.IsNullOrWhiteSpace(f.AlternativaLinuxEn))
+            ? f.AlternativaLinuxEn! : (f.AlternativaLinux ?? string.Empty);
+        var nota = (lang == Lang.En && !string.IsNullOrWhiteSpace(f.NotaComunEn)) ? f.NotaComunEn : f.NotaComun;
+        if (f.EstrategiaSeparacion == SeparationStrategy.Comun && !string.IsNullOrWhiteSpace(nota))
         {
             var comun = Loc.T(lang, "Común", "Common");
-            text = string.IsNullOrWhiteSpace(text) ? $"{comun}: {f.NotaComun}" : $"{text} ({comun}: {f.NotaComun})";
+            text = string.IsNullOrWhiteSpace(text) ? $"{comun}: {nota}" : $"{text} ({comun}: {nota})";
         }
         return text;
     }
+
+    /// <summary>Pasos de remediación en el idioma pedido (EN si hay traducción; si no, ES).</summary>
+    public static string StepsInline(Finding f, Lang lang) =>
+        StepsInline(lang == Lang.En && f.PasosRemediacionEn.Count > 0 ? f.PasosRemediacionEn : f.PasosRemediacion);
 }

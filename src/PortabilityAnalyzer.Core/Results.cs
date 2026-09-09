@@ -1,4 +1,4 @@
-namespace PortabilityAnalyzer.Core;
+﻿namespace PortabilityAnalyzer.Core;
 
 /// <summary>Hallazgo con trazabilidad completa hasta el sitio de deteccion.</summary>
 public sealed record Finding
@@ -24,6 +24,11 @@ public sealed record Finding
     public IReadOnlyList<string> PasosRemediacion { get; init; } = new List<string>();
     public SeparationStrategy? EstrategiaSeparacion { get; init; }
     public string? NotaComun { get; init; }
+
+    // --- Traduccion al INGLES (Fase 2). Si faltan, el informe EN usa el texto español. ---
+    public string? AlternativaLinuxEn { get; init; }
+    public IReadOnlyList<string> PasosRemediacionEn { get; init; } = new List<string>();
+    public string? NotaComunEn { get; init; }
 }
 
 public sealed record AssemblyClassification(string Path, string Name, AssemblyKind Kind, string? Reason = null);

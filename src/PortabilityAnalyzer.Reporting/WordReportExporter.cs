@@ -121,7 +121,7 @@ public sealed class WordReportExporter : IReportExporter
                             ReportGrouping.StrategyText(f.EstrategiaSeparacion, _lang),
                             f.Evidencia ?? string.Empty,
                             ReportGrouping.AlternativeWithNote(f, _lang),
-                            ReportGrouping.StepsInline(f.PasosRemediacion)
+                            ReportGrouping.StepsInline(f, _lang)
                         };
                     })));
             }

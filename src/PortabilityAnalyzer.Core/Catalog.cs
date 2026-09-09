@@ -1,4 +1,4 @@
-namespace PortabilityAnalyzer.Core;
+﻿namespace PortabilityAnalyzer.Core;
 
 /// <summary>Patron que identifica una dependencia. Puro dato (deserializable desde JSON).</summary>
 public sealed record RulePattern
@@ -62,6 +62,17 @@ public sealed record PortabilityRule
 
     /// <summary>Si la libreria puede ser comun a ambos SO, como manejarlo (TFM net8.0, guardas de SO, DI...).</summary>
     public string? NotaComun { get; init; }
+
+    // --- Traduccion al INGLES (Fase 2). Campos opcionales; si faltan, el informe EN usa el texto español. ---
+
+    /// <summary>Alternativa portable en inglés (equivalente a <see cref="AlternativaLinux"/>).</summary>
+    public string? AlternativaLinuxEn { get; init; }
+
+    /// <summary>Pasos de remediación en inglés (equivalente a <see cref="PasosRemediacion"/>).</summary>
+    public IReadOnlyList<string> PasosRemediacionEn { get; init; } = new List<string>();
+
+    /// <summary>Nota "común" en inglés (equivalente a <see cref="NotaComun"/>).</summary>
+    public string? NotaComunEn { get; init; }
 }
 
 /// <summary>Catalogo completo cargado desde JSON.</summary>

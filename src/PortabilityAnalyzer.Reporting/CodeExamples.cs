@@ -135,24 +135,120 @@ public static class CodeExamples
             "WMI es exclusivo de Windows; se aísla tras una interfaz y parte de la información ya la da RuntimeInformation (portable).")
     };
 
-    /// <summary>Titulo y nota en INGLES por categoria (el bloque de codigo es neutral y no se traduce).</summary>
-    private static readonly Dictionary<string, (string Titulo, string Nota)> En = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>Titulo, bloque de codigo y nota en INGLES por categoria (traduccion completa del apendice).</summary>
+    private static readonly Dictionary<string, (string Titulo, string Codigo, string Nota)> En = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Registry"] = ("Windows Registry -> portable configuration",
+            """
+            // Windows only:
+            using Microsoft.Win32;
+            var path = (string?)Registry.GetValue(@"HKLM\SOFTWARE\MyApp", "Path", null);
+
+            // Portable: externalize to configuration (appsettings.json / environment variables)
+            IConfiguration cfg = new ConfigurationBuilder()
+                .AddJsonFile("appsettings.json", optional: true)
+                .AddEnvironmentVariables()
+                .Build();
+            var path = cfg["MyApp:Path"];
+
+            // If the Registry must be read ONLY on Windows, isolate it per OS at run time:
+            var value = OperatingSystem.IsWindows()
+                ? (string?)Registry.GetValue(@"HKLM\SOFTWARE\MyApp", "Path", null)
+                : cfg["MyApp:Path"];
+            """,
             "OperatingSystem.IsWindows() avoids PlatformNotSupportedException when running outside Windows."),
         ["PInvoke"] = ("P/Invoke -> managed API or conditional compilation",
+            """
+            // Windows only (P/Invoke to kernel32):
+            [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
+
+            // Managed, portable equivalent (preferred):
+            long ms = Environment.TickCount64;
+
+            // If there is NO equivalent, conditional compilation (net8.0-windows defines the WINDOWS symbol):
+            public static long Uptime()
+            {
+            #if WINDOWS
+                return (long)GetTickCount64();       // P/Invoke compiles only on Windows
+            #else
+                return Environment.TickCount64;      // portable branch (non-Windows impl if ever needed: another team)
+            #endif
+            }
+            """,
             "The net8.0-windows TFM defines WINDOWS; the portable core (net8.0) compiles the #else branch."),
         ["Identity"] = ("Windows identity -> abstraction (the \"seam\")",
+            """
+            // Windows only:
+            var name = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+
+            // Portable: abstract identity behind an interface (the core depends on IUserIdentity)
+            public interface IUserIdentity { string Name { get; } }
+
+            // Windows implementation (the only one developed here):
+            public sealed class WindowsUserIdentity : IUserIdentity
+            {
+                public string Name => System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+            }
+            // The non-Windows implementation of IUserIdentity is left as a seam, up to another team.
+            """,
             "Business logic depends only on IUserIdentity; Windows provides its implementation (DI). The non-Windows seam is left ready."),
         ["Database"] = ("Oracle: System.Data.OracleClient -> Oracle.ManagedDataAccess.Core",
+            """
+            // Before (removed in modern .NET, Windows only):
+            using System.Data.OracleClient;
+            using var c = new OracleConnection(connStr);
+
+            // Portable (NuGet package Oracle.ManagedDataAccess.Core):
+            using Oracle.ManagedDataAccess.Client;
+            using var c = new OracleConnection(connStr);
+            // Almost identical API; review the connection string (TNS/EZConnect) and the Oracle types.
+            """,
             "Oracle.ManagedDataAccess.Core is 100% managed and portable (no OS dependency)."),
         ["UI"] = ("UI (WPF/WinForms) -> portable core + isolated Windows UI",
+            """
+            // WPF/WinForms are tied to Windows. PORTABLE-FIRST structure:
+            //   MyApp.Core         (net8.0)          -> logic and ViewModels (portable, no UI)
+            //   MyApp.App.Windows  (net8.0-windows)  -> WPF (the current UI)
+            // Key rule: the core must NOT reference PresentationFramework or System.Windows.Forms,
+            // so the ViewModels/logic are reusable by any future UI.
+            // The non-Windows UI is NOT developed here: it is left ready for another team to provide,
+            // reusing the core ViewModels.
+            """,
             "Separating UI from logic keeps the core portable and reusable; the non-Windows UI is left for another team."),
         ["Cryptography"] = ("DPAPI -> portable managed encryption",
+            """
+            // Windows only (DPAPI):
+            byte[] prot = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
+
+            // Portable: AES with an externally managed key (KMS / secrets manager)
+            using var aes = Aes.Create();
+            aes.Key = keyFromSecretsManager;   // do not derive from DPAPI
+
+            // Also: RSA.Create()/ECDsa.Create() instead of the *Cng/*CryptoServiceProvider variants.
+            """,
             "IMPORTANT: data already protected with DPAPI CANNOT be decrypted outside Windows; plan a re-encryption."),
         ["EventLog"] = ("Event Viewer -> portable logging",
+            """
+            // Windows only:
+            new System.Diagnostics.EventLog("Application").WriteEntry("msg");
+
+            // Portable (Serilog / Microsoft.Extensions.Logging): console/file output
+            ILogger log = loggerFactory.CreateLogger("MyApp");
+            log.LogInformation("msg");
+            """,
             "A single portable logging framework replaces the Windows Event Viewer."),
         ["WMI"] = ("WMI -> abstraction (the \"seam\")",
+            """
+            // Windows only (WMI):
+            using System.Management;
+            var os = new ManagementObjectSearcher("SELECT * FROM Win32_OperatingSystem");
+
+            // Portable: abstract the system query behind an interface
+            public interface ISystemInfo { string OsDescription { get; } }
+            // Portable part available: RuntimeInformation.OSDescription.
+            // The data that today only WMI provides is isolated behind ISystemInfo; its non-Windows
+            // implementation, if needed, is left as a seam up to another team.
+            """,
             "WMI is Windows-only; it is isolated behind an interface and part of the info is already provided by RuntimeInformation (portable)."),
     };
 
@@ -162,7 +258,7 @@ public static class CodeExamples
         var set = categorias.ToHashSet(StringComparer.OrdinalIgnoreCase);
         return All.Where(e => set.Contains(e.Categoria))
             .Select(e => lang == Lang.En && En.TryGetValue(e.Categoria, out var t)
-                ? e with { Titulo = t.Titulo, Nota = t.Nota }
+                ? e with { Titulo = t.Titulo, Codigo = t.Codigo, Nota = t.Nota }
                 : e)
             .ToList();
     }

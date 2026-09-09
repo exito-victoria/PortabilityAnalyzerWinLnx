@@ -119,7 +119,13 @@
           "items": { "type": "string", "minLength": 1 }
         },
         "estrategiaSeparacion": { "$ref": "#/$defs/estrategiaSeparacion" },
-        "notaComun": { "type": "string" }
+        "notaComun": { "type": "string" },
+        "alternativaLinuxEn": { "type": "string" },
+        "pasosRemediacionEn": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "notaComunEn": { "type": "string" }
       }
     }
   }

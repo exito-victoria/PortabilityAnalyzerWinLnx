@@ -22,6 +22,9 @@ internal static class FindingFactory
         Evidencia = evidencia,
         PasosRemediacion = rule.PasosRemediacion,
         EstrategiaSeparacion = rule.EstrategiaSeparacion,
-        NotaComun = rule.NotaComun
+        NotaComun = rule.NotaComun,
+        AlternativaLinuxEn = rule.AlternativaLinuxEn,
+        PasosRemediacionEn = rule.PasosRemediacionEn,
+        NotaComunEn = rule.NotaComunEn
     };
 }
