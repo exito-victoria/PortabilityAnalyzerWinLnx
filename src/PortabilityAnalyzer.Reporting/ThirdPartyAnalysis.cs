@@ -7,8 +7,13 @@ public sealed record NativeDependency(string Dll, int Sites, bool IsWindowsSyste
 
 /// <summary>Una API Windows GESTIONADA (no P/Invoke) que llama un ensamblado de terceros: el tipo/atributo
 /// concreto de .NET dependiente de Windows (p. ej. RegistryKey, WindowsIdentity, EventLog), su categoria,
-/// el nº de sitios de llamada y la alternativa multiplataforma.</summary>
-public sealed record WindowsManagedApi(string Categoria, string Api, int Sites, string AlternativaLinux);
+/// el nº de sitios de llamada y la alternativa multiplataforma (ES e inglés).</summary>
+public sealed record WindowsManagedApi(string Categoria, string Api, int Sites, string AlternativaLinux, string? AlternativaLinuxEn = null)
+{
+    /// <summary>Alternativa en el idioma pedido (EN si hay traducción; si no, ES).</summary>
+    public string Alternative(Lang lang) =>
+        lang == Lang.En && !string.IsNullOrWhiteSpace(AlternativaLinuxEn) ? AlternativaLinuxEn! : AlternativaLinux;
+}
 
 /// <summary>Perfil de dependencias del SO de un ensamblado de terceros (sin fuentes).</summary>
 public sealed record ThirdPartyProfile(
@@ -18,7 +23,13 @@ public sealed record ThirdPartyProfile(
     IReadOnlyList<NativeDependency> NativeDeps,
     IReadOnlyList<WindowsManagedApi> WindowsApis,
     int WindowsApiRules,
-    string? SuggestedReplacement);
+    string? SuggestedReplacement,
+    string? SuggestedReplacementEn = null)
+{
+    /// <summary>Reemplazo sugerido en el idioma pedido (EN si hay traducción; si no, ES).</summary>
+    public string? SuggestedReplacementFor(Lang lang) =>
+        lang == Lang.En && !string.IsNullOrWhiteSpace(SuggestedReplacementEn) ? SuggestedReplacementEn : SuggestedReplacement;
+}
 
 /// <summary>
 /// Analisis en profundidad de los ensamblados de terceros: como no se controla su codigo ni su build,
@@ -37,12 +48,15 @@ public static class ThirdPartyAnalysis
         "userenv.dll", "wininet.dll", "urlmon.dll", "rpcrt4.dll", "cfgmgr32.dll", "powrprof.dll"
     };
 
-    // Reemplazos multiplataforma conocidos por nombre de ensamblado de terceros.
-    private static readonly Dictionary<string, string> KnownReplacements = new(StringComparer.OrdinalIgnoreCase)
+    // Reemplazos multiplataforma conocidos por nombre de ensamblado de terceros (ES / EN).
+    private static readonly Dictionary<string, (string Es, string En)> KnownReplacements = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Oracle.DataAccess"] = "Oracle.ManagedDataAccess.Core (ODP.NET gestionado, multiplataforma)",
-        ["Oracle.ManagedDataAccess"] = "Oracle.ManagedDataAccess.Core (variante multiplataforma)",
-        ["System.Data.SqlClient"] = "Microsoft.Data.SqlClient (multiplataforma)"
+        ["Oracle.DataAccess"] = ("Oracle.ManagedDataAccess.Core (ODP.NET gestionado, multiplataforma)",
+                                 "Oracle.ManagedDataAccess.Core (managed ODP.NET, cross-platform)"),
+        ["Oracle.ManagedDataAccess"] = ("Oracle.ManagedDataAccess.Core (variante multiplataforma)",
+                                        "Oracle.ManagedDataAccess.Core (cross-platform variant)"),
+        ["System.Data.SqlClient"] = ("Microsoft.Data.SqlClient (multiplataforma)",
+                                     "Microsoft.Data.SqlClient (cross-platform)")
     };
 
     public static IReadOnlyList<ThirdPartyProfile> Analyze(AnalysisReport report)
@@ -73,7 +87,8 @@ public static class ThirdPartyAnalysis
                     g.Key.Categoria,
                     g.Key.Api,
                     g.Select(f => (f.Type, f.Method)).Distinct().Count(),
-                    g.Select(f => f.AlternativaLinux).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)) ?? string.Empty))
+                    g.Select(f => f.AlternativaLinux).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)) ?? string.Empty,
+                    g.Select(f => f.AlternativaLinuxEn).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a))))
                 .OrderBy(a => a.Categoria).ThenByDescending(a => a.Sites)
                 .ToList();
 
@@ -86,7 +101,8 @@ public static class ThirdPartyAnalysis
             KnownReplacements.TryGetValue(asm.Classification.Name, out var replacement);
 
             profiles.Add(new ThirdPartyProfile(
-                asm.Classification.Name, asm.MaxSeverity, asm.HasBlocker, native, winApis, winApiRules, replacement));
+                asm.Classification.Name, asm.MaxSeverity, asm.HasBlocker, native, winApis, winApiRules,
+                replacement.Es, replacement.En));
         }
 
         return profiles.OrderByDescending(p => p.MaxSeverity).ThenByDescending(p => p.NativeDeps.Count).ToList();

@@ -385,8 +385,8 @@ public sealed class WordReportExporter : IReportExporter
         foreach (var p in profiles)
         {
             b.Append(Para($"{p.Assembly} ({T("Severidad", "Severity")}: {Loc.Severity(p.MaxSeverity, _lang)})", bold: true, sizeHalfPt: 24));
-            if (p.SuggestedReplacement is not null)
-                b.Append(Para($"{T("Reemplazo sugerido", "Suggested replacement")}: {p.SuggestedReplacement}"));
+            if (p.SuggestedReplacementFor(_lang) is { } repl)
+                b.Append(Para($"{T("Reemplazo sugerido", "Suggested replacement")}: {repl}"));
             b.Append(Para(T($"APIs/referencias Windows gestionadas detectadas: {p.WindowsApiRules} regla(s)",
                             $"Managed Windows APIs/references detected: {p.WindowsApiRules} rule(s)")));
 
@@ -410,7 +410,7 @@ public sealed class WordReportExporter : IReportExporter
                 b.Append(BuildTable(
                     new[] { T("Categoría", "Category"), T("API / tipo Windows", "API / Windows type"), T("Sitios", "Sites"), T("Alternativa portable / multiplataforma", "Portable / cross-platform alternative") },
                     new[] { 2.0, 3.0, 1.0, 4.0 },
-                    p.WindowsApis.Select(a => new[] { Loc.Category(a.Categoria, _lang), a.Api, a.Sites.ToString(), a.AlternativaLinux })));
+                    p.WindowsApis.Select(a => new[] { Loc.Category(a.Categoria, _lang), a.Api, a.Sites.ToString(), a.Alternative(_lang) })));
             }
         }
         b.Append(Para(string.Empty));
