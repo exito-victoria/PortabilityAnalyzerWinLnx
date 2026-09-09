@@ -1,4 +1,4 @@
-using PortabilityAnalyzer.Core;
+﻿using PortabilityAnalyzer.Core;
 using PortabilityAnalyzer.Engine;
 using PortabilityAnalyzer.Engine.Detectors;
 using PortabilityAnalyzer.Reporting;
@@ -217,15 +217,19 @@ internal static class Program
                 Log.Information("Informe {Format} escrito en {Path}", fmt, path);
             }
 
-            // Informe EJECUTIVO (solo con --executive): InformeEjec_<proyecto>.docx en la carpeta del informe general.
+            // Informe EJECUTIVO (solo con --executive): se genera en ESPAÑOL e INGLÉS (Word) en la carpeta
+            // del informe general -> InformeEjec_<proyecto>.docx (ES) e InformeEjec_<proyecto>_EN.docx (EN).
             if (options.Executive)
             {
                 var projName = ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)
                     ? Path.GetFileNameWithoutExtension(options.InputPath)
                     : Path.GetFileNameWithoutExtension(options.OutputPath);
-                var execPath = Path.Combine(reportDir, $"InformeEjec_{projName}.docx");
-                new ExecutiveWordExporter(projName).Export(report, execPath);
-                Log.Information("Informe ejecutivo escrito en {Path}", execPath);
+                foreach (var texts in new[] { ExecTexts.Spanish, ExecTexts.English })
+                {
+                    var execPath = Path.Combine(reportDir, $"InformeEjec_{projName}{texts.FileSuffix}.docx");
+                    new ExecutiveWordExporter(projName, texts).Export(report, execPath);
+                    Log.Information("Informe ejecutivo escrito en {Path}", execPath);
+                }
             }
 
             Log.Information("Analisis completado (bloqueantes: {Blockers}, esfuerzo medio: {Media:0.#} h)",

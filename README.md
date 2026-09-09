@@ -103,7 +103,8 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
   (clases y ficheros afectados), **análisis de código fuente** (dónde y cómo corregir) y un **apéndice de
   equivalencias portables / aislamiento por SO** con fragmentos de código. El Word incluye **Tabla de
   contenido** (con estilos de título) y **repite las cabeceras** de tabla al partir en páginas.
-- **Ejecutivo** (`--executive`): Word breve para el **cliente** — resumen, cifras clave, **estimación por
+- **Ejecutivo** (`--executive`): Word breve para el **cliente**, generado en **español e inglés**
+  (`InformeEjec_<proyecto>.docx` e `InformeEjec_<proyecto>_EN.docx`) — resumen, cifras clave, **estimación por
   proyecto** distinguiendo Proyecto propio de **DLL de terceros** (con su autor), coste por bloque
   (optimista primero), hallazgos principales, restricciones y recomendación.
 - **JSON**: contrato para integraciones (se **mantiene** estable; los cambios solo añaden).
