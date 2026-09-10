@@ -70,6 +70,7 @@ public sealed class SolutionRewriter
         public bool UseWpf;
         public bool UseWinForms;
         public string? OutputType;
+        public string? Tfm;                 // TargetFramework(s) original
         // Propiedades del PropertyGroup original que hay que conservar para no romper la compilacion.
         public string? ImplicitUsings;
         public string? Nullable;
@@ -118,6 +119,7 @@ public sealed class SolutionRewriter
                 UseWpf = Regex.IsMatch(text, "<UseWPF>\\s*true", RegexOptions.IgnoreCase) || text.Contains("PresentationFramework", StringComparison.OrdinalIgnoreCase),
                 UseWinForms = Regex.IsMatch(text, "<UseWindowsForms>\\s*true", RegexOptions.IgnoreCase) || text.Contains("System.Windows.Forms", StringComparison.OrdinalIgnoreCase),
                 OutputType = Prop(text, "OutputType"),
+                Tfm = Prop(text, "TargetFramework") ?? Prop(text, "TargetFrameworks"),
                 ImplicitUsings = Prop(text, "ImplicitUsings"),
                 Nullable = Prop(text, "Nullable"),
                 LangVersion = Prop(text, "LangVersion"),
@@ -230,7 +232,7 @@ public sealed class SolutionRewriter
         RecreateDir(outputDir);
         var emitted = new List<(string Name, string RelCsproj)>();  // para el .sln
         var rewritten = new List<RewrittenProject>();
-        var allSeams = new List<(string Project, string Concrete, string Interface)>();
+        var allSeams = new List<(string Project, string Concrete, string Interface, string Namespace)>();
 
         foreach (var info in infos)
         {
@@ -250,8 +252,11 @@ public sealed class SolutionRewriter
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0", info.PackageLines, info.UseWpf, info.UseWinForms,
                         (IsExeType(info.OutputType) || info.HasEntryPoint) ? info.OutputType : null, refs, portableRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((outName, $"{outName}\\{outName}.csproj"));
-                    rewritten.Add(new RewrittenProject(info.Name, "Portable",
-                        info.UseWpf || info.UseWinForms ? "Sin hallazgos Windows" : "Sin dependencias de Windows",
+                    var alreadyNet8 = info.Tfm is not null && !info.Tfm.Contains("-windows", StringComparison.OrdinalIgnoreCase);
+                    var portableReason = alreadyNet8
+                        ? $"Ya estaba en {info.Tfm} sin dependencias de Windows: ya separado, copiado sin cambios"
+                        : "Sin dependencias de Windows: retargeteado a net8.0";
+                    rewritten.Add(new RewrittenProject(info.Name, "Portable", portableReason,
                         new[] { outName }, info.PortableCode.Count + info.WinCode.Count, 0));
                     break;
                 }
@@ -282,7 +287,7 @@ public sealed class SolutionRewriter
                     // clases Windows, extrayendo una interfaz e inyectándola por constructor.
                     var seam = RunSeamPass(info);
                     warnings.AddRange(seam.Warnings);
-                    foreach (var s in seam.Seams) allSeams.Add((info.Name, s.Concrete, s.Interface));
+                    foreach (var s in seam.Seams) allSeams.Add((info.Name, s.Concrete, s.Interface, s.Namespace));
 
                     // NÚCLEO (net8.0): ficheros portables (con las reescrituras de inyección) + interfaces de seam.
                     CopyCode(seam.Portable, info.Dir, coreDir, coreName, seam.CoreOverrides);
@@ -301,12 +306,23 @@ public sealed class SolutionRewriter
                     // + referencia a su propio núcleo.
                     CopyCode(seam.Win, info.Dir, winDir, winName, seam.WinOverrides);
                     CopyContent(info.WinContent, winDir);
+
+                    // Si hubo seams, se GENERA el registro DI (composition root) con las implementaciones
+                    // Windows, para que el cableado quede hecho (solo falta invocarlo en el arranque).
+                    var winPkgs = info.PackageLines.ToList();
+                    if (seam.Seams.Count > 0)
+                    {
+                        WriteGenerated(new[] { ("SeamRegistration.cs", BuildSeamRegistration(winName, seam.Seams)) }, winDir);
+                        if (!winPkgs.Any(p => p.Contains("Microsoft.Extensions.DependencyInjection.Abstractions", StringComparison.OrdinalIgnoreCase)))
+                            winPkgs.Add("<PackageReference Include=\"Microsoft.Extensions.DependencyInjection.Abstractions\" Version=\"8.0.2\" />");
+                    }
+
                     var winRefs = new List<string> { coreName };
                     winRefs.AddRange(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!));
                     var winRelPaths = new List<string> { $"..\\{coreName}\\{coreName}.csproj" };
                     winRelPaths.AddRange(ProjRelPaths(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList()));
                     winRelPaths.AddRange(ExternalRelPaths(info.ExternalRefs, winDir, onlyPortable: false));
-                    WriteCsproj(Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", info.PackageLines, info.UseWpf, info.UseWinForms,
+                    WriteCsproj(Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", winPkgs, info.UseWpf, info.UseWinForms,
                         (IsExeType(info.OutputType) || info.HasEntryPoint) ? (info.OutputType ?? "WinExe") : null, winRefs, winRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((winName, $"{winName}\\{winName}.csproj"));
 
@@ -350,6 +366,34 @@ public sealed class SolutionRewriter
         }
     }
 
+    /// <summary>Genera el registro DI (composition root) con las implementaciones Windows de los seams,
+    /// para que el cableado quede HECHO: basta invocar AddWindowsSeams(...) en el arranque de la app.</summary>
+    private static string BuildSeamRegistration(string winProject, IReadOnlyList<(string Concrete, string Interface, string Namespace)> seams)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [Reescritura multiplataforma] Registro DI de las implementaciones Windows de los seams.");
+        sb.AppendLine("// Invoca services.AddWindowsSeams() en el Composition Root (arranque) de la aplicación Windows.");
+        sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {winProject};");
+        sb.AppendLine();
+        sb.AppendLine("public static class SeamRegistration");
+        sb.AppendLine("{");
+        sb.AppendLine("    /// <summary>Registra las implementaciones Windows de las interfaces (seams) extraídas al núcleo.</summary>");
+        sb.AppendLine("    public static IServiceCollection AddWindowsSeams(this IServiceCollection services)");
+        sb.AppendLine("    {");
+        foreach (var s in seams)
+        {
+            var iface = string.IsNullOrEmpty(s.Namespace) ? s.Interface : $"global::{s.Namespace}.{s.Interface}";
+            var impl = string.IsNullOrEmpty(s.Namespace) ? s.Concrete : $"global::{s.Namespace}.{s.Concrete}";
+            sb.AppendLine($"        services.AddSingleton<{iface}, {impl}>();");
+        }
+        sb.AppendLine("        return services;");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
     /// <summary>Escribe ficheros .cs generados (p. ej. interfaces de seam) directamente en el proyecto.</summary>
     private static void WriteGenerated(IEnumerable<(string Rel, string Content)> files, string outDir)
     {
@@ -383,7 +427,7 @@ public sealed class SolutionRewriter
         public Dictionary<string, string> CoreOverrides = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, string> WinOverrides = new(StringComparer.OrdinalIgnoreCase);
         public List<(string Rel, string Content)> CoreExtraFiles = new();
-        public List<(string Concrete, string Interface)> Seams = new();
+        public List<(string Concrete, string Interface, string Namespace)> Seams = new();
         public List<string> Warnings = new();
     }
 
@@ -441,10 +485,10 @@ public sealed class SolutionRewriter
             {
                 if (res.Seams.Any(s => s.Concrete == t)) continue;
                 var pl = PlanFor(t)!;
-                res.Seams.Add((t, pl.InterfaceName));
+                res.Seams.Add((t, pl.InterfaceName, pl.Namespace));
                 res.CoreExtraFiles.Add(($"{pl.InterfaceName}.cs", pl.InterfaceSource));
                 var wf = winTypeToFile[t];
-                var baseContent = res.WinOverrides.TryGetValue(wf.Rel, out var oc) ? oc : File.ReadAllText(wf.Abs);
+                var baseContent = res.WinOverrides.TryGetValue(wf.Rel, out var oc) ? oc : ReadTextCached(wf.Abs);
                 res.WinOverrides[wf.Rel] = SeamWeaver.AddBaseInterface(baseContent, t, pl.InterfaceName);
             }
         }
@@ -595,61 +639,73 @@ public sealed class SolutionRewriter
     }
 
     private static void WriteMigrationReadme(string path, string solutionName, IReadOnlyList<RewrittenProject> projects,
-        IReadOnlyList<string> warnings, IReadOnlyList<(string Project, string Concrete, string Interface)> seams)
+        IReadOnlyList<string> warnings, IReadOnlyList<(string Project, string Concrete, string Interface, string Namespace)> seams)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {solutionName} — solución reescrita a multiplataforma");
         sb.AppendLine();
-        sb.AppendLine("> Reescritura **portable-first**: el núcleo de cada proyecto queda en `net8.0` (compila en cualquier SO) y");
-        sb.AppendLine("> lo específico de Windows se aísla en un proyecto `net8.0-windows`. La solución original NO se ha tocado.");
+        sb.AppendLine("> **Cambios ya implementados** por la reescritura portable-first. La solución original NO se ha tocado;");
+        sb.AppendLine("> esta es una solución nueva, completa y separada. Este documento resume **lo que se ha hecho**.");
         sb.AppendLine();
-        sb.AppendLine("## Proyectos generados");
+
+        sb.AppendLine("## Separación realizada por proyecto");
         sb.AppendLine();
-        sb.AppendLine("| Proyecto original | Clasificación | Proyectos generados | Portables | Windows |");
+        sb.AppendLine("| Proyecto original | Resultado | Proyectos generados | Ficheros núcleo | Ficheros Windows |");
         sb.AppendLine("|---|---|---|---:|---:|");
         foreach (var p in projects)
-            sb.AppendLine($"| {p.OriginalProject} | {p.Kind} | {string.Join(" + ", p.OutputProjects)} | {p.PortableFiles} | {p.WindowsFiles} |");
+            sb.AppendLine($"| {p.OriginalProject} | {p.Kind} — {p.Reason} | {string.Join(" + ", p.OutputProjects)} | {p.PortableFiles} | {p.WindowsFiles} |");
         sb.AppendLine();
-        sb.AppendLine("**Clasificación:** *Portable* = sin dependencias de Windows (retargeteado a net8.0). ");
-        sb.AppendLine("*Separable* = dividido en `X.Core` (net8.0, portable) + `X.Windows` (net8.0-windows). ");
-        sb.AppendLine("*SoloWindows* = todo el proyecto depende de Windows (típicamente la UI/punto de entrada).");
+        sb.AppendLine("- **Portable**: no tenía dependencias de Windows → quedó en un único proyecto `net8.0` (los ya `net8.0`,");
+        sb.AppendLine("  p. ej. los `*Multi`, se copiaron sin cambios; los `net8.0-windows` sin dependencias reales se retargetearon).");
+        sb.AppendLine("- **Separable**: se dividió en `X.Core` (`net8.0`, portable) + `X.Windows` (`net8.0-windows`), repartiendo los");
+        sb.AppendLine("  ficheros por sus dependencias de Windows (namespaces conservados).");
+        sb.AppendLine("- **SoloWindows**: todo el proyecto dependía de Windows (UI/punto de entrada) → quedó en `net8.0-windows`.");
         sb.AppendLine();
-        sb.AppendLine("## Cómo se han recableado las referencias");
-        sb.AppendLine("- Un proyecto **`.Core`/portable** solo referencia núcleos portables (`*.Core` o proyectos portables).");
-        sb.AppendLine("- Un proyecto **`.Windows`** referencia su propio `.Core` y las partes `.Windows` de sus dependencias.");
-        sb.AppendLine("- Los **paquetes NuGet solo-Windows** (EventLog, Registry, ProtectedData…) se han dejado únicamente en los proyectos `.Windows`.");
+
+        sb.AppendLine("## Referencias recableadas (hecho)");
+        sb.AppendLine("- Cada proyecto **`.Core`/portable** referencia solo núcleos portables (`*.Core` o proyectos portables).");
+        sb.AppendLine("- Cada proyecto **`.Windows`** referencia su propio `.Core` y las partes `.Windows` de sus dependencias.");
+        sb.AppendLine("- Los **paquetes NuGet solo-Windows** (EventLog, Registry, ProtectedData…) se dejaron solo en los `.Windows`.");
+        sb.AppendLine("- Las **referencias a proyectos externos** a la solución se conservaron apuntando a su `.csproj` original.");
         sb.AppendLine();
+
         if (seams.Count > 0)
         {
-            sb.AppendLine("## Seams extraídos automáticamente (interfaz en el núcleo ↔ implementación Windows)");
+            sb.AppendLine("## Seams aplicados (hecho): interfaz en el núcleo ↔ implementación Windows + DI");
             sb.AppendLine();
-            sb.AppendLine("Estos ficheros del núcleo dependían de una clase de Windows. Se extrajo una interfaz al núcleo,");
-            sb.AppendLine("la clase Windows ahora la implementa, y el consumidor recibe la interfaz por **inyección de dependencias**.");
-            sb.AppendLine("Falta **registrar** cada implementación en el arranque de la aplicación (proyecto `.Windows`):");
+            sb.AppendLine("Cada fichero del núcleo que dependía de una clase de Windows se ha **desacoplado**: se extrajo su interfaz");
+            sb.AppendLine("al núcleo, la clase Windows la implementa, y el consumidor recibe la interfaz por **inyección por constructor**.");
+            sb.AppendLine("Además se **generó el registro DI** (`SeamRegistration.AddWindowsSeams`) en cada proyecto `.Windows`.");
+            sb.AppendLine();
+            sb.AppendLine("| Interfaz (núcleo) | Implementación Windows | Proyecto |");
+            sb.AppendLine("|---|---|---|");
+            foreach (var s in seams)
+                sb.AppendLine($"| `{s.Interface}` | `{s.Concrete}` | {s.Project} |");
+            sb.AppendLine();
+            sb.AppendLine("Lo ÚNICO que queda por hacer es **invocar** el registro generado desde el arranque de tu app Windows:");
             sb.AppendLine();
             sb.AppendLine("```csharp");
-            sb.AppendLine("// Ejemplo con Microsoft.Extensions.DependencyInjection (añade el paquete si no lo tienes):");
-            foreach (var s in seams)
-                sb.AppendLine($"services.AddSingleton<{s.Interface}, {s.Concrete}>();   // proyecto {s.Project}");
+            foreach (var proj in seams.Select(s => s.Project).Distinct())
+                sb.AppendLine($"services.AddWindowsSeams();   // de {proj}.Windows");
             sb.AppendLine("```");
             sb.AppendLine();
-            sb.AppendLine("La implementación para otros SO (Linux…) se añade creando otra clase que implemente la misma");
-            sb.AppendLine("interfaz y registrándola en su lugar. El núcleo no cambia.");
+            sb.AppendLine("La implementación para otros SO (Linux…) se añade creando otra clase que implemente la misma interfaz");
+            sb.AppendLine("y registrándola en su lugar; **el núcleo no cambia** (queda preparado para otro equipo).");
             sb.AppendLine();
         }
+
         if (warnings.Count > 0)
         {
-            sb.AppendLine("## Avisos que requieren intervención manual");
+            sb.AppendLine("## Avisos (revisar)");
             foreach (var w in warnings) sb.AppendLine($"- {w}");
             sb.AppendLine();
         }
-        sb.AppendLine("## Pasos siguientes");
-        sb.AppendLine($"1. Abre `{solutionName}.sln` y **compila**. Los núcleos `net8.0` deben compilar en cualquier SO.");
-        sb.AppendLine("2. Donde un núcleo necesite una capacidad de Windows, introduce una **interfaz (seam)** en el núcleo e");
-        sb.AppendLine("   impleméntala en el proyecto `.Windows` (inyección de dependencias). La implementación para otros SO");
-        sb.AppendLine("   queda preparada para otro equipo (no se desarrolla ni se prescribe aquí).");
-        sb.AppendLine("3. Verifica que el código Windows (WPF/Registro/P-Invoke…) sigue compilando en `net8.0-windows`.");
-        sb.AppendLine("4. Añade pruebas que compilen el núcleo portable en un CI multiplataforma (matriz Windows + Linux).");
+
+        sb.AppendLine("## Verificación sugerida");
+        sb.AppendLine($"1. Abre `{solutionName}.sln` y **compila**: los núcleos `net8.0` compilan en cualquier SO; el código");
+        sb.AppendLine("   Windows (WPF/Registro/P-Invoke…) compila en `net8.0-windows`.");
+        sb.AppendLine("2. Invoca `AddWindowsSeams()` en el Composition Root (arranque) de la app Windows (ver arriba).");
+        sb.AppendLine("3. Añade un CI multiplataforma (matriz Windows + Linux) que compile los núcleos portables.");
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
     }
 

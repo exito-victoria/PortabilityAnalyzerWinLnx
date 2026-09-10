@@ -125,8 +125,10 @@ internal static class Program
             // divisiblePorUI, obligatorioMultiplataforma y los listados en "separables". Los proyectos
             // generados se escriben en una SUBCARPETA dedicada ('proyectos-separados') para que NUNCA
             // colisionen con las carpetas de codigo originales (evita borrar el codigo fuente del usuario).
+            // Si se pide la REESCRITURA COMPLETA (--rewrite), NO se genera el scaffold antiguo por-proyecto
+            // (proyectos-separados/ + SPLIT-NOTES): la reescritura lo sustituye por la solucion completa.
             var splitResults = new List<SplitResult>();
-            if (!roles.IsEmpty && ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
+            if (options.RewriteDir is null && !roles.IsEmpty && ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
             {
                 var splitBaseDir = Path.Combine(reportDir, "proyectos-separados");
                 Directory.CreateDirectory(splitBaseDir);
