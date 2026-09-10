@@ -159,6 +159,27 @@ internal static class Program
                 }
             }
 
+            // REESCRITURA COMPLETA A MULTIPLATAFORMA (--rewrite <dir>): genera una solucion nueva hermana
+            // con todos los proyectos separados en net8.0 (portable) + net8.0-windows. No toca el original.
+            if (options.RewriteDir is not null && ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath))
+            {
+                var proyectos = new ProjectDiscovery().GetProjects(options.InputPath);
+                var slnName = Path.GetFileNameWithoutExtension(options.InputPath) + "-multiplataforma";
+                try
+                {
+                    var rewrite = new SolutionRewriter().Rewrite(slnName, proyectos, sourceFindings, Path.GetFullPath(options.RewriteDir));
+                    Log.Information("Reescritura multiplataforma: {N} proyecto(s) -> {Portable} portable, {Sep} separable(s), {Win} solo-Windows en {Dir}",
+                        rewrite.Projects.Count,
+                        rewrite.Projects.Count(p => p.Kind == "Portable"),
+                        rewrite.Projects.Count(p => p.Kind == "Separable"),
+                        rewrite.Projects.Count(p => p.Kind == "SoloWindows"),
+                        rewrite.OutputDir);
+                    Log.Information("Solucion reescrita: {Sln}", rewrite.SolutionFile);
+                    foreach (var w in rewrite.Warnings) Log.Warning("Reescritura: {Aviso}", w);
+                }
+                catch (Exception ex) { Log.Error(ex, "No se pudo reescribir la solucion: {Error}", ex.Message); }
+            }
+
             var results = new List<AssemblyAnalysisResult>();
             foreach (var asmRef in assemblies)
                 results.Add(engine.AnalyzeAssembly(asmRef.Path, asmRef.IsThirdParty));

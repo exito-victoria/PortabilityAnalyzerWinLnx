@@ -35,9 +35,14 @@ internal sealed class CliOptions
     /// <c>InformeEjec_&lt;nombreproyecto&gt;.docx</c> en la misma carpeta del informe general.</summary>
     public bool Executive { get; init; }
 
+    /// <summary>Carpeta de salida para REESCRIBIR la solucion completa a multiplataforma (flag
+    /// <c>--rewrite &lt;dir&gt;</c>). Si se indica, se genera una solucion nueva hermana con los proyectos
+    /// separados en net8.0 (portable) y net8.0-windows. Debe estar FUERA de la carpeta de la solucion.</summary>
+    public string? RewriteDir { get; init; }
+
     public static CliOptions? Parse(string[] args)
     {
-        string? input = null, rules = null, schema = null, output = null, format = null, rolesPath = null;
+        string? input = null, rules = null, schema = null, output = null, format = null, rolesPath = null, rewriteDir = null;
         bool assumeThirdParty = false;
         bool executive = false;
         double thirdPartyFactor = 1.5;
@@ -62,6 +67,8 @@ internal sealed class CliOptions
                 case "--executive":
                     executive = true;
                     break;
+
+                case "--rewrite": rewriteDir = Next(args, ref i); break;
 
                 case "--third-party-factor":
                     var raw = Next(args, ref i);
@@ -97,7 +104,8 @@ internal sealed class CliOptions
             AssumeThirdParty = assumeThirdParty,
             ThirdPartyFactor = thirdPartyFactor,
             TestingFactor = testingFactor,
-            Executive = executive
+            Executive = executive,
+            RewriteDir = rewriteDir
         };
     }
 
@@ -141,6 +149,7 @@ internal sealed class CliOptions
             "                            (p. ej. 'word,markdown' -> una ejecucion, dos informes; la extension" + Environment.NewLine +
             "                            de cada uno se deriva de --output cuando se piden varios)." + Environment.NewLine +
             "  --executive               Genera ademas el informe ejecutivo InformeEjec_<proyecto>.docx (resumen para el cliente)." + Environment.NewLine +
+            "  --rewrite <dir>           Reescribe la solucion completa a multiplataforma en <dir> (proyectos net8.0 + net8.0-windows)." + Environment.NewLine +
             "  --assume-third-party      Aplica un factor de incertidumbre (x1.5 por defecto) a todos los ensamblados." + Environment.NewLine +
             "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party." + Environment.NewLine +
             "  --testing-factor <n>      Fraccion del esfuerzo de desarrollo imputada a Pruebas y CI (por defecto 0.25).");
