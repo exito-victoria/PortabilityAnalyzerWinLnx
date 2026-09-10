@@ -182,6 +182,7 @@ public sealed class SolutionRewriter
         RecreateDir(outputDir);
         var emitted = new List<(string Name, string RelCsproj)>();  // para el .sln
         var rewritten = new List<RewrittenProject>();
+        var allSeams = new List<(string Project, string Concrete, string Interface)>();
 
         foreach (var info in infos)
         {
@@ -227,9 +228,16 @@ public sealed class SolutionRewriter
                     var coreDir = Path.Combine(outputDir, coreName);
                     var winDir = Path.Combine(outputDir, winName);
 
-                    // NÚCLEO (net8.0): ficheros portables.
-                    CopyCode(info.PortableCode, info.Dir, coreDir, coreName);
+                    // Pase de seams: intenta mantener en el núcleo los ficheros portables que dependen de
+                    // clases Windows, extrayendo una interfaz e inyectándola por constructor.
+                    var seam = RunSeamPass(info);
+                    warnings.AddRange(seam.Warnings);
+                    foreach (var s in seam.Seams) allSeams.Add((info.Name, s.Concrete, s.Interface));
+
+                    // NÚCLEO (net8.0): ficheros portables (con las reescrituras de inyección) + interfaces de seam.
+                    CopyCode(seam.Portable, info.Dir, coreDir, coreName, seam.CoreOverrides);
                     CopyContent(info.PortableContent, coreDir);
+                    WriteGenerated(seam.CoreExtraFiles, coreDir);
                     var coreRefs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null)
@@ -238,8 +246,9 @@ public sealed class SolutionRewriter
                         null, coreRefs, ProjRelPaths(coreRefs), windowsOnlyFilter: true);
                     emitted.Add((coreName, $"{coreName}\\{coreName}.csproj"));
 
-                    // WINDOWS (net8.0-windows): ficheros Windows + referencia a su propio núcleo.
-                    CopyCode(info.WinCode, info.Dir, winDir, winName);
+                    // WINDOWS (net8.0-windows): ficheros Windows (algunos implementan ya la interfaz de seam)
+                    // + referencia a su propio núcleo.
+                    CopyCode(seam.Win, info.Dir, winDir, winName, seam.WinOverrides);
                     CopyContent(info.WinContent, winDir);
                     var winRefs = new List<string> { coreName };
                     winRefs.AddRange(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!));
@@ -250,8 +259,9 @@ public sealed class SolutionRewriter
                     emitted.Add((winName, $"{winName}\\{winName}.csproj"));
 
                     rewritten.Add(new RewrittenProject(info.Name, "Separable",
-                        $"{info.PortableCode.Count} fichero(s) portable(s) + {info.WinCode.Count} con dependencias de Windows",
-                        new[] { coreName, winName }, info.PortableCode.Count, info.WinCode.Count));
+                        $"{seam.Portable.Count} fichero(s) en el núcleo + {seam.Win.Count} con dependencias de Windows" +
+                        (seam.Seams.Count > 0 ? $"; {seam.Seams.Count} seam(s) extraído(s)" : string.Empty),
+                        new[] { coreName, winName }, seam.Portable.Count, seam.Win.Count));
                     break;
                 }
             }
@@ -260,7 +270,7 @@ public sealed class SolutionRewriter
         // 5) Generar el .sln y el README de migración.
         var slnPath = Path.Combine(outputDir, solutionName + ".sln");
         WriteSolution(slnPath, emitted);
-        WriteMigrationReadme(Path.Combine(outputDir, "MIGRACION.md"), solutionName, rewritten, warnings);
+        WriteMigrationReadme(Path.Combine(outputDir, "MIGRACION.md"), solutionName, rewritten, warnings, allSeams);
 
         return new RewriteResult
         {
@@ -275,15 +285,27 @@ public sealed class SolutionRewriter
     // Copia de ficheros
     // ---------------------------------------------------------------------------------------------
 
-    private static void CopyCode(IEnumerable<(string Abs, string Rel)> files, string srcDir, string outDir, string outProject)
+    private static void CopyCode(IEnumerable<(string Abs, string Rel)> files, string srcDir, string outDir, string outProject,
+        IReadOnlyDictionary<string, string>? overrides = null)
     {
         foreach (var f in files)
         {
             var target = Path.Combine(outDir, f.Rel);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            var content = File.ReadAllText(f.Abs);
+            var content = overrides is not null && overrides.TryGetValue(f.Rel, out var oc) ? oc : File.ReadAllText(f.Abs);
             var header = $"// [Reescritura multiplataforma] Proyecto {outProject}. Namespace conservado del original.";
             File.WriteAllText(target, header + Environment.NewLine + content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        }
+    }
+
+    /// <summary>Escribe ficheros .cs generados (p. ej. interfaces de seam) directamente en el proyecto.</summary>
+    private static void WriteGenerated(IEnumerable<(string Rel, string Content)> files, string outDir)
+    {
+        foreach (var (rel, content) in files)
+        {
+            var target = Path.Combine(outDir, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.WriteAllText(target, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         }
     }
 
@@ -295,6 +317,90 @@ public sealed class SolutionRewriter
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(f.Abs, target, overwrite: true);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Pase de SEAMS: mantiene en el núcleo los ficheros portables que dependen de clases Windows,
+    // extrayendo una interfaz e inyectándola por constructor (ver SeamWeaver).
+    // ---------------------------------------------------------------------------------------------
+
+    private sealed class SeamPassResult
+    {
+        public required List<(string Abs, string Rel)> Portable;
+        public required List<(string Abs, string Rel)> Win;
+        public Dictionary<string, string> CoreOverrides = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> WinOverrides = new(StringComparer.OrdinalIgnoreCase);
+        public List<(string Rel, string Content)> CoreExtraFiles = new();
+        public List<(string Concrete, string Interface)> Seams = new();
+        public List<string> Warnings = new();
+    }
+
+    private static SeamPassResult RunSeamPass(ProjInfo info)
+    {
+        var res = new SeamPassResult { Portable = info.PortableCode.ToList(), Win = info.WinCode.ToList() };
+
+        // Mapa: nombre de clase Windows -> fichero donde se declara.
+        var winTypeToFile = new Dictionary<string, (string Abs, string Rel)>(StringComparer.Ordinal);
+        foreach (var f in info.WinCode)
+        {
+            try
+            {
+                var root = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
+                foreach (var t in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+                    if (!winTypeToFile.ContainsKey(t.Identifier.Text)) winTypeToFile[t.Identifier.Text] = (f.Abs, f.Rel);
+            }
+            catch { /* ignorar */ }
+        }
+        if (winTypeToFile.Count == 0) return res;
+
+        var planByType = new Dictionary<string, SeamWeaver.SeamPlan?>(StringComparer.Ordinal);
+        SeamWeaver.SeamPlan? PlanFor(string t)
+        {
+            if (planByType.TryGetValue(t, out var p)) return p;
+            p = winTypeToFile.TryGetValue(t, out var wf) ? SeamWeaver.ExtractInterface(File.ReadAllText(wf.Abs), t) : null;
+            planByType[t] = p;
+            return p;
+        }
+
+        foreach (var f in info.PortableCode)
+        {
+            string content;
+            SyntaxNode root;
+            try { content = File.ReadAllText(f.Abs); root = CSharpSyntaxTree.ParseText(content).GetRoot(); }
+            catch { continue; }
+
+            var declaredHere = root.DescendantNodes().OfType<TypeDeclarationSyntax>().Select(t => t.Identifier.Text).ToHashSet(StringComparer.Ordinal);
+            var used = root.DescendantNodes().OfType<IdentifierNameSyntax>().Select(id => id.Identifier.Text)
+                .Where(n => winTypeToFile.ContainsKey(n) && !declaredHere.Contains(n)).Distinct().ToList();
+            if (used.Count == 0) continue; // sin referencia cruzada: se queda portable tal cual
+
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            bool allExtractable = true;
+            foreach (var t in used) { var pl = PlanFor(t); if (pl is null) { allExtractable = false; break; } map[t] = pl.InterfaceName; }
+            var rewritten = allExtractable ? SeamWeaver.TryInjectConstructor(content, map) : null;
+
+            if (rewritten is null)
+            {
+                // No inyectable de forma segura: mover el fichero al proyecto Windows (fallback) y avisar.
+                res.Portable.RemoveAll(x => string.Equals(x.Rel, f.Rel, StringComparison.OrdinalIgnoreCase));
+                if (!res.Win.Any(x => string.Equals(x.Rel, f.Rel, StringComparison.OrdinalIgnoreCase))) res.Win.Add(f);
+                res.Warnings.Add($"'{info.Name}': '{f.Rel}' usa tipos Windows ({string.Join(", ", used)}) de forma no inyectable automáticamente; se movió a {info.WinName}. Revisar para introducir un seam a mano.");
+                continue;
+            }
+
+            res.CoreOverrides[f.Rel] = rewritten;
+            foreach (var t in used)
+            {
+                if (res.Seams.Any(s => s.Concrete == t)) continue;
+                var pl = PlanFor(t)!;
+                res.Seams.Add((t, pl.InterfaceName));
+                res.CoreExtraFiles.Add(($"{pl.InterfaceName}.cs", pl.InterfaceSource));
+                var wf = winTypeToFile[t];
+                var baseContent = res.WinOverrides.TryGetValue(wf.Rel, out var oc) ? oc : File.ReadAllText(wf.Abs);
+                res.WinOverrides[wf.Rel] = SeamWeaver.AddBaseInterface(baseContent, t, pl.InterfaceName);
+            }
+        }
+        return res;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -396,7 +502,8 @@ public sealed class SolutionRewriter
         return new Guid(hash).ToString();
     }
 
-    private static void WriteMigrationReadme(string path, string solutionName, IReadOnlyList<RewrittenProject> projects, IReadOnlyList<string> warnings)
+    private static void WriteMigrationReadme(string path, string solutionName, IReadOnlyList<RewrittenProject> projects,
+        IReadOnlyList<string> warnings, IReadOnlyList<(string Project, string Concrete, string Interface)> seams)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {solutionName} — solución reescrita a multiplataforma");
@@ -420,6 +527,24 @@ public sealed class SolutionRewriter
         sb.AppendLine("- Un proyecto **`.Windows`** referencia su propio `.Core` y las partes `.Windows` de sus dependencias.");
         sb.AppendLine("- Los **paquetes NuGet solo-Windows** (EventLog, Registry, ProtectedData…) se han dejado únicamente en los proyectos `.Windows`.");
         sb.AppendLine();
+        if (seams.Count > 0)
+        {
+            sb.AppendLine("## Seams extraídos automáticamente (interfaz en el núcleo ↔ implementación Windows)");
+            sb.AppendLine();
+            sb.AppendLine("Estos ficheros del núcleo dependían de una clase de Windows. Se extrajo una interfaz al núcleo,");
+            sb.AppendLine("la clase Windows ahora la implementa, y el consumidor recibe la interfaz por **inyección de dependencias**.");
+            sb.AppendLine("Falta **registrar** cada implementación en el arranque de la aplicación (proyecto `.Windows`):");
+            sb.AppendLine();
+            sb.AppendLine("```csharp");
+            sb.AppendLine("// Ejemplo con Microsoft.Extensions.DependencyInjection (añade el paquete si no lo tienes):");
+            foreach (var s in seams)
+                sb.AppendLine($"services.AddSingleton<{s.Interface}, {s.Concrete}>();   // proyecto {s.Project}");
+            sb.AppendLine("```");
+            sb.AppendLine();
+            sb.AppendLine("La implementación para otros SO (Linux…) se añade creando otra clase que implemente la misma");
+            sb.AppendLine("interfaz y registrándola en su lugar. El núcleo no cambia.");
+            sb.AppendLine();
+        }
         if (warnings.Count > 0)
         {
             sb.AppendLine("## Avisos que requieren intervención manual");
