@@ -1,4 +1,4 @@
-namespace Demo.Persistence;
+﻿namespace Demo.Persistence;
 
 /// <summary>Servicio de configuración PORTABLE en sí mismo (no usa ninguna API de Windows), pero
 /// depende de <see cref="RegistrySettings"/>, que sí es de Windows. Es el caso típico de referencia

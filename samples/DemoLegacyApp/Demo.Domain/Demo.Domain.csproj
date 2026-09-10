@@ -8,4 +8,9 @@
     <RootNamespace>Demo.Domain</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Proyecto EXTERNO a la solución (no está en DemoLegacyApp.sln). -->
+    <ProjectReference Include="..\..\ExternalContracts\Contracts.csproj" />
+  </ItemGroup>
+
 </Project>

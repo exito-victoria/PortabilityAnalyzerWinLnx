@@ -1,4 +1,4 @@
-namespace Demo.Domain;
+﻿namespace Demo.Domain;
 
 /// <summary>Lógica de negocio pura y portable: calcula totales e impuestos.</summary>
 public static class InvoiceCalculator

@@ -76,6 +76,7 @@ public sealed class SolutionRewriter
         public string? LangVersion;
         public string? RootNamespace;
         public List<string> RefNames = new();            // referencias a otros proyectos de la solución
+        public List<(string AbsCsproj, bool Portable)> ExternalRefs = new(); // referencias a proyectos externos
         public List<(string Abs, string Rel)> WinCode = new();
         public List<(string Abs, string Rel)> PortableCode = new();
         public List<(string Abs, string Rel)> WinContent = new();
@@ -168,9 +169,19 @@ public sealed class SolutionRewriter
                 {
                     if (!string.Equals(refName, info.Name, StringComparison.OrdinalIgnoreCase)) info.RefNames.Add(refName);
                 }
+                else if (File.Exists(full))
+                {
+                    // Referencia EXTERNA (proyecto fuera del conjunto analizado): se conserva apuntando a su
+                    // .csproj original, con la ruta relativa recalculada desde cada proyecto generado.
+                    var portable = IsPortableCsproj(full);
+                    if (!info.ExternalRefs.Any(e => string.Equals(e.AbsCsproj, full, StringComparison.OrdinalIgnoreCase)))
+                        info.ExternalRefs.Add((full, portable));
+                    if (!portable)
+                        warnings.Add($"'{info.Name}' referencia el proyecto EXTERNO '{Path.GetFileName(rel)}' (net…-windows o UI), fuera de la solución analizada: se conserva SOLO en el lado Windows. Si el núcleo lo necesita, extraer un seam.");
+                }
                 else
                 {
-                    warnings.Add($"'{info.Name}' referencia el proyecto '{Path.GetFileName(rel)}', que no está en la solución analizada: esa referencia no se ha recableado. Añádela a mano en los proyectos generados.");
+                    warnings.Add($"'{info.Name}' referencia '{Path.GetFileName(rel)}', que no está en la solución ni se encuentra en disco ({rel}): la referencia no se ha podido conservar. Añádela a mano.");
                 }
             }
         }
@@ -235,8 +246,9 @@ public sealed class SolutionRewriter
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null && WinSideRef(rn) is not null)
                             warnings.Add($"'{outName}' (portable) referenciaba a '{rn}', que quedó solo-Windows: revisar (introducir un seam) o mantener este proyecto en net8.0-windows.");
+                    var portableRelPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0", info.PackageLines, info.UseWpf, info.UseWinForms,
-                        (IsExeType(info.OutputType) || info.HasEntryPoint) ? info.OutputType : null, refs, ProjRelPaths(refs), windowsOnlyFilter: false, source: info);
+                        (IsExeType(info.OutputType) || info.HasEntryPoint) ? info.OutputType : null, refs, portableRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((outName, $"{outName}\\{outName}.csproj"));
                     rewritten.Add(new RewrittenProject(info.Name, "Portable",
                         info.UseWpf || info.UseWinForms ? "Sin hallazgos Windows" : "Sin dependencias de Windows",
@@ -250,8 +262,9 @@ public sealed class SolutionRewriter
                     CopyCode(info.PortableCode.Concat(info.WinCode), info.Dir, projDir, outName);
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
                     var refs = info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList();
+                    var winOnlyRelPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0-windows", info.PackageLines, info.UseWpf, info.UseWinForms,
-                        info.OutputType, refs, ProjRelPaths(refs), windowsOnlyFilter: false, source: info);
+                        info.OutputType, refs, winOnlyRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((outName, $"{outName}\\{outName}.csproj"));
                     rewritten.Add(new RewrittenProject(info.Name, "SoloWindows",
                         "Todo el proyecto depende de Windows (UI/entrada sin parte portable)",
@@ -279,8 +292,9 @@ public sealed class SolutionRewriter
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null)
                             warnings.Add($"El núcleo '{coreName}' referenciaba a '{rn}', que quedó solo-Windows: introducir un seam (interfaz) en el núcleo o mover el uso a '{winName}'.");
+                    var coreRelPaths = ProjRelPaths(coreRefs).Concat(ExternalRelPaths(info.ExternalRefs, coreDir, onlyPortable: true)).ToList();
                     WriteCsproj(Path.Combine(coreDir, coreName + ".csproj"), "net8.0", info.PackageLines, false, false,
-                        null, coreRefs, ProjRelPaths(coreRefs), windowsOnlyFilter: true, source: info);
+                        null, coreRefs, coreRelPaths, windowsOnlyFilter: true, source: info);
                     emitted.Add((coreName, $"{coreName}\\{coreName}.csproj"));
 
                     // WINDOWS (net8.0-windows): ficheros Windows (algunos implementan ya la interfaz de seam)
@@ -291,6 +305,7 @@ public sealed class SolutionRewriter
                     winRefs.AddRange(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!));
                     var winRelPaths = new List<string> { $"..\\{coreName}\\{coreName}.csproj" };
                     winRelPaths.AddRange(ProjRelPaths(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList()));
+                    winRelPaths.AddRange(ExternalRelPaths(info.ExternalRefs, winDir, onlyPortable: false));
                     WriteCsproj(Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", info.PackageLines, info.UseWpf, info.UseWinForms,
                         (IsExeType(info.OutputType) || info.HasEntryPoint) ? (info.OutputType ?? "WinExe") : null, winRefs, winRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((winName, $"{winName}\\{winName}.csproj"));
@@ -451,6 +466,36 @@ public sealed class SolutionRewriter
     /// <summary>True si el OutputType corresponde a un ejecutable (Exe/WinExe).</summary>
     private static bool IsExeType(string? outputType) =>
         outputType is not null && outputType.Contains("Exe", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Heurística de portabilidad de un proyecto EXTERNO (no reescrito): portable si su TFM no
+    /// apunta a *-windows y no usa WPF/WinForms. Si no se puede leer, se considera NO portable (conservador:
+    /// no se añade al núcleo net8.0 para no arrastrar dependencias de Windows en silencio).</summary>
+    private static bool IsPortableCsproj(string absCsproj)
+    {
+        try
+        {
+            var text = File.ReadAllText(absCsproj);
+            if (Regex.IsMatch(text, "<UseWPF>\\s*true", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(text, "<UseWindowsForms>\\s*true", RegexOptions.IgnoreCase)) return false;
+            var tfm = Prop(text, "TargetFramework") ?? Prop(text, "TargetFrameworks");
+            if (tfm is null) return false;
+            return !tfm.Split(';').Any(t => t.Trim().Contains("-windows", StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Rutas relativas (estilo csproj) desde <paramref name="outProjDir"/> a los .csproj externos.
+    /// Si <paramref name="onlyPortable"/> es true, solo incluye los externos portables (para el núcleo net8.0).</summary>
+    private static IReadOnlyList<string> ExternalRelPaths(IEnumerable<(string AbsCsproj, bool Portable)> externals, string outProjDir, bool onlyPortable)
+    {
+        var list = new List<string>();
+        foreach (var e in externals)
+        {
+            if (onlyPortable && !e.Portable) continue;
+            list.Add(Path.GetRelativePath(outProjDir, e.AbsCsproj).Replace('/', '\\'));
+        }
+        return list;
+    }
 
     private static bool IsWindowsOnlyPackage(string packageLine)
     {
