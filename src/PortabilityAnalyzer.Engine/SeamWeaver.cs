@@ -19,6 +19,15 @@ internal static class SeamWeaver
     /// <summary>Un seam generado: la interfaz portable extraída de una clase Windows.</summary>
     public sealed record SeamPlan(string ConcreteType, string InterfaceName, string Namespace, string InterfaceSource);
 
+    /// <summary>Tokens de tipos/namespaces de Windows: si aparecen en la firma de un miembro, la interfaz
+    /// extraída no sería portable y no se genera el seam.</summary>
+    private static readonly string[] WindowsTypeMarkers =
+    {
+        "RegistryKey", "Microsoft.Win32", "EventLog", "EventLogEntryType", "WindowsIdentity",
+        "WindowsPrincipal", "System.Windows", "System.Drawing", "System.Management", "ManagementObject",
+        "ServiceController", "X509Store", "RegistryHive", "RegistryValueKind"
+    };
+
     /// <summary>Miembros públicos de instancia de un tipo (para extraer su interfaz).</summary>
     private sealed record Member(string Text);
 
@@ -37,6 +46,11 @@ internal static class SeamWeaver
         var ns = type.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault()?.Name.ToString() ?? string.Empty;
         var members = PublicInstanceMembers(type);
         if (members.Count == 0) return null;
+
+        // Si algún miembro público expone tipos de Windows en su firma (p. ej. devuelve RegistryKey), la
+        // interfaz NO sería portable: en ese caso no se ofrece seam (el consumidor caerá al proyecto Windows).
+        if (members.Any(m => WindowsTypeMarkers.Any(mk => m.Text.Contains(mk, StringComparison.Ordinal))))
+            return null;
 
         var interfaceName = "I" + typeName;
         var sb = new StringBuilder();
@@ -127,6 +141,8 @@ internal static class SeamWeaver
             {
                 var typeName = StripGlobal(field.Declaration.Type.ToString().Trim());
                 if (!concreteToInterface.TryGetValue(typeName, out var iface)) continue;
+                // Un campo estático de un tipo Windows no se puede inyectar por constructor de instancia.
+                if (field.Modifiers.Any(x => x.IsKind(SyntaxKind.StaticKeyword))) return null;
                 // Debe declarar una sola variable con inicializador 'new T(...)' o 'new()'.
                 if (field.Declaration.Variables.Count != 1) return null;
                 var v = field.Declaration.Variables[0];

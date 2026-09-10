@@ -37,6 +37,28 @@ public sealed class SolutionRewriter
         "System.Windows.Extensions", "Microsoft.Windows.Compatibility", "System.Drawing.Common"
     };
 
+    // Cachés por fichero (una pasada de reescritura): evitan releer y reparsear el mismo .cs varias veces
+    // (clasificación, expansión Windows, pase de seams y copia).
+    private readonly Dictionary<string, string> _textCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SyntaxNode?> _rootCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private string ReadTextCached(string abs)
+    {
+        if (_textCache.TryGetValue(abs, out var t)) return t;
+        t = File.ReadAllText(abs);
+        _textCache[abs] = t;
+        return t;
+    }
+
+    private SyntaxNode? RootCached(string abs)
+    {
+        if (_rootCache.TryGetValue(abs, out var r)) return r;
+        try { r = CSharpSyntaxTree.ParseText(ReadTextCached(abs)).GetRoot(); }
+        catch { r = null; }
+        _rootCache[abs] = r;
+        return r;
+    }
+
     private enum Kind { Portable, Separable, WindowsOnly }
 
     private sealed class ProjInfo
@@ -48,6 +70,11 @@ public sealed class SolutionRewriter
         public bool UseWpf;
         public bool UseWinForms;
         public string? OutputType;
+        // Propiedades del PropertyGroup original que hay que conservar para no romper la compilacion.
+        public string? ImplicitUsings;
+        public string? Nullable;
+        public string? LangVersion;
+        public string? RootNamespace;
         public List<string> RefNames = new();            // referencias a otros proyectos de la solución
         public List<(string Abs, string Rel)> WinCode = new();
         public List<(string Abs, string Rel)> PortableCode = new();
@@ -89,7 +116,11 @@ public sealed class SolutionRewriter
                 PackageLines = PackageRefLine.Matches(text).Select(m => m.Value.Trim()).Distinct().ToList(),
                 UseWpf = Regex.IsMatch(text, "<UseWPF>\\s*true", RegexOptions.IgnoreCase) || text.Contains("PresentationFramework", StringComparison.OrdinalIgnoreCase),
                 UseWinForms = Regex.IsMatch(text, "<UseWindowsForms>\\s*true", RegexOptions.IgnoreCase) || text.Contains("System.Windows.Forms", StringComparison.OrdinalIgnoreCase),
-                OutputType = Regex.Match(text, "<OutputType>\\s*([^<]+?)\\s*</OutputType>", RegexOptions.IgnoreCase) is { Success: true } m ? m.Groups[1].Value.Trim() : null
+                OutputType = Prop(text, "OutputType"),
+                ImplicitUsings = Prop(text, "ImplicitUsings"),
+                Nullable = Prop(text, "Nullable"),
+                LangVersion = Prop(text, "LangVersion"),
+                RootNamespace = Prop(text, "RootNamespace")
             };
 
             // Ficheros del proyecto (código y contenido), excluyendo obj/bin y el .csproj.
@@ -133,8 +164,14 @@ public sealed class SolutionRewriter
             {
                 var rel = m.Groups[1].Value.Replace('\\', Path.DirectorySeparatorChar);
                 var full = Path.GetFullPath(Path.Combine(info.Dir, rel));
-                if (byNormalizedCsproj.TryGetValue(full, out var refName) && !string.Equals(refName, info.Name, StringComparison.OrdinalIgnoreCase))
-                    info.RefNames.Add(refName);
+                if (byNormalizedCsproj.TryGetValue(full, out var refName))
+                {
+                    if (!string.Equals(refName, info.Name, StringComparison.OrdinalIgnoreCase)) info.RefNames.Add(refName);
+                }
+                else
+                {
+                    warnings.Add($"'{info.Name}' referencia el proyecto '{Path.GetFileName(rel)}', que no está en la solución analizada: esa referencia no se ha recableado. Añádela a mano en los proyectos generados.");
+                }
             }
         }
 
@@ -199,7 +236,7 @@ public sealed class SolutionRewriter
                         if (CoreSideRef(rn) is null && WinSideRef(rn) is not null)
                             warnings.Add($"'{outName}' (portable) referenciaba a '{rn}', que quedó solo-Windows: revisar (introducir un seam) o mantener este proyecto en net8.0-windows.");
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0", info.PackageLines, info.UseWpf, info.UseWinForms,
-                        info.HasEntryPoint ? info.OutputType : null, refs, ProjRelPaths(refs), windowsOnlyFilter: false);
+                        (IsExeType(info.OutputType) || info.HasEntryPoint) ? info.OutputType : null, refs, ProjRelPaths(refs), windowsOnlyFilter: false, source: info);
                     emitted.Add((outName, $"{outName}\\{outName}.csproj"));
                     rewritten.Add(new RewrittenProject(info.Name, "Portable",
                         info.UseWpf || info.UseWinForms ? "Sin hallazgos Windows" : "Sin dependencias de Windows",
@@ -214,7 +251,7 @@ public sealed class SolutionRewriter
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
                     var refs = info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0-windows", info.PackageLines, info.UseWpf, info.UseWinForms,
-                        info.OutputType, refs, ProjRelPaths(refs), windowsOnlyFilter: false);
+                        info.OutputType, refs, ProjRelPaths(refs), windowsOnlyFilter: false, source: info);
                     emitted.Add((outName, $"{outName}\\{outName}.csproj"));
                     rewritten.Add(new RewrittenProject(info.Name, "SoloWindows",
                         "Todo el proyecto depende de Windows (UI/entrada sin parte portable)",
@@ -243,7 +280,7 @@ public sealed class SolutionRewriter
                         if (CoreSideRef(rn) is null)
                             warnings.Add($"El núcleo '{coreName}' referenciaba a '{rn}', que quedó solo-Windows: introducir un seam (interfaz) en el núcleo o mover el uso a '{winName}'.");
                     WriteCsproj(Path.Combine(coreDir, coreName + ".csproj"), "net8.0", info.PackageLines, false, false,
-                        null, coreRefs, ProjRelPaths(coreRefs), windowsOnlyFilter: true);
+                        null, coreRefs, ProjRelPaths(coreRefs), windowsOnlyFilter: true, source: info);
                     emitted.Add((coreName, $"{coreName}\\{coreName}.csproj"));
 
                     // WINDOWS (net8.0-windows): ficheros Windows (algunos implementan ya la interfaz de seam)
@@ -255,7 +292,7 @@ public sealed class SolutionRewriter
                     var winRelPaths = new List<string> { $"..\\{coreName}\\{coreName}.csproj" };
                     winRelPaths.AddRange(ProjRelPaths(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList()));
                     WriteCsproj(Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", info.PackageLines, info.UseWpf, info.UseWinForms,
-                        info.HasEntryPoint ? (info.OutputType ?? "WinExe") : null, winRefs, winRelPaths, windowsOnlyFilter: false);
+                        (IsExeType(info.OutputType) || info.HasEntryPoint) ? (info.OutputType ?? "WinExe") : null, winRefs, winRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((winName, $"{winName}\\{winName}.csproj"));
 
                     rewritten.Add(new RewrittenProject(info.Name, "Separable",
@@ -285,14 +322,14 @@ public sealed class SolutionRewriter
     // Copia de ficheros
     // ---------------------------------------------------------------------------------------------
 
-    private static void CopyCode(IEnumerable<(string Abs, string Rel)> files, string srcDir, string outDir, string outProject,
+    private void CopyCode(IEnumerable<(string Abs, string Rel)> files, string srcDir, string outDir, string outProject,
         IReadOnlyDictionary<string, string>? overrides = null)
     {
         foreach (var f in files)
         {
             var target = Path.Combine(outDir, f.Rel);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            var content = overrides is not null && overrides.TryGetValue(f.Rel, out var oc) ? oc : File.ReadAllText(f.Abs);
+            var content = overrides is not null && overrides.TryGetValue(f.Rel, out var oc) ? oc : ReadTextCached(f.Abs);
             var header = $"// [Reescritura multiplataforma] Proyecto {outProject}. Namespace conservado del original.";
             File.WriteAllText(target, header + Environment.NewLine + content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         }
@@ -335,7 +372,7 @@ public sealed class SolutionRewriter
         public List<string> Warnings = new();
     }
 
-    private static SeamPassResult RunSeamPass(ProjInfo info)
+    private SeamPassResult RunSeamPass(ProjInfo info)
     {
         var res = new SeamPassResult { Portable = info.PortableCode.ToList(), Win = info.WinCode.ToList() };
 
@@ -343,13 +380,10 @@ public sealed class SolutionRewriter
         var winTypeToFile = new Dictionary<string, (string Abs, string Rel)>(StringComparer.Ordinal);
         foreach (var f in info.WinCode)
         {
-            try
-            {
-                var root = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
-                foreach (var t in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
-                    if (!winTypeToFile.ContainsKey(t.Identifier.Text)) winTypeToFile[t.Identifier.Text] = (f.Abs, f.Rel);
-            }
-            catch { /* ignorar */ }
+            var root = RootCached(f.Abs);
+            if (root is null) continue;
+            foreach (var t in root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+                if (!winTypeToFile.ContainsKey(t.Identifier.Text)) winTypeToFile[t.Identifier.Text] = (f.Abs, f.Rel);
         }
         if (winTypeToFile.Count == 0) return res;
 
@@ -357,17 +391,16 @@ public sealed class SolutionRewriter
         SeamWeaver.SeamPlan? PlanFor(string t)
         {
             if (planByType.TryGetValue(t, out var p)) return p;
-            p = winTypeToFile.TryGetValue(t, out var wf) ? SeamWeaver.ExtractInterface(File.ReadAllText(wf.Abs), t) : null;
+            p = winTypeToFile.TryGetValue(t, out var wf) ? SeamWeaver.ExtractInterface(ReadTextCached(wf.Abs), t) : null;
             planByType[t] = p;
             return p;
         }
 
         foreach (var f in info.PortableCode)
         {
-            string content;
-            SyntaxNode root;
-            try { content = File.ReadAllText(f.Abs); root = CSharpSyntaxTree.ParseText(content).GetRoot(); }
-            catch { continue; }
+            var root = RootCached(f.Abs);
+            if (root is null) continue;
+            var content = ReadTextCached(f.Abs);
 
             var declaredHere = root.DescendantNodes().OfType<TypeDeclarationSyntax>().Select(t => t.Identifier.Text).ToHashSet(StringComparer.Ordinal);
             var used = root.DescendantNodes().OfType<IdentifierNameSyntax>().Select(id => id.Identifier.Text)
@@ -410,6 +443,15 @@ public sealed class SolutionRewriter
     private static IReadOnlyList<string> ProjRelPaths(IReadOnlyList<string> refNames) =>
         refNames.Select(n => $"..\\{n}\\{n}.csproj").ToList();
 
+    /// <summary>Lee el valor de una propiedad simple del PropertyGroup del csproj (o null si no está).</summary>
+    private static string? Prop(string csprojText, string name) =>
+        Regex.Match(csprojText, $"<{name}>\\s*([^<]+?)\\s*</{name}>", RegexOptions.IgnoreCase) is { Success: true } m
+            ? m.Groups[1].Value.Trim() : null;
+
+    /// <summary>True si el OutputType corresponde a un ejecutable (Exe/WinExe).</summary>
+    private static bool IsExeType(string? outputType) =>
+        outputType is not null && outputType.Contains("Exe", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsWindowsOnlyPackage(string packageLine)
     {
         var inc = IncludeAttr.Match(packageLine);
@@ -419,7 +461,8 @@ public sealed class SolutionRewriter
     }
 
     private static void WriteCsproj(string path, string tfm, IReadOnlyList<string> packageLines, bool useWpf, bool useWinForms,
-        string? outputType, IReadOnlyList<string> refNames, IReadOnlyList<string> refRelPaths, bool windowsOnlyFilter)
+        string? outputType, IReadOnlyList<string> refNames, IReadOnlyList<string> refRelPaths, bool windowsOnlyFilter,
+        ProjInfo? source = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<Project Sdk=\"Microsoft.NET.Sdk\">");
@@ -427,8 +470,12 @@ public sealed class SolutionRewriter
         sb.AppendLine("  <PropertyGroup>");
         sb.AppendLine($"    <TargetFramework>{tfm}</TargetFramework>");
         if (!string.IsNullOrWhiteSpace(outputType)) sb.AppendLine($"    <OutputType>{outputType}</OutputType>");
-        sb.AppendLine("    <ImplicitUsings>enable</ImplicitUsings>");
-        sb.AppendLine("    <Nullable>enable</Nullable>");
+        // Se CONSERVAN las propiedades del proyecto original (si estaban) para no cambiar el comportamiento
+        // de compilacion; si el original no las declaraba, no se emiten (se respeta el default del SDK).
+        if (source?.ImplicitUsings is { } iu) sb.AppendLine($"    <ImplicitUsings>{iu}</ImplicitUsings>");
+        if (source?.Nullable is { } nl) sb.AppendLine($"    <Nullable>{nl}</Nullable>");
+        if (source?.LangVersion is { } lv) sb.AppendLine($"    <LangVersion>{lv}</LangVersion>");
+        if (source?.RootNamespace is { } rns) sb.AppendLine($"    <RootNamespace>{rns}</RootNamespace>");
         if (useWpf) sb.AppendLine("    <UseWPF>true</UseWPF>");
         if (useWinForms) sb.AppendLine("    <UseWindowsForms>true</UseWindowsForms>");
         sb.AppendLine("  </PropertyGroup>");
@@ -614,21 +661,18 @@ public sealed class SolutionRewriter
             || name.EndsWith(".suo", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsEntryPoint(string absPath)
+    private bool IsEntryPoint(string absPath)
     {
-        try
-        {
-            var root = CSharpSyntaxTree.ParseText(File.ReadAllText(absPath)).GetRoot();
-            if (root.DescendantNodes().OfType<GlobalStatementSyntax>().Any()) return true;
-            return root.DescendantNodes().OfType<MethodDeclarationSyntax>()
-                .Any(m => m.Identifier.Text == "Main" && m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.StaticKeyword)));
-        }
-        catch { return false; }
+        var root = RootCached(absPath);
+        if (root is null) return false;
+        if (root.DescendantNodes().OfType<GlobalStatementSyntax>().Any()) return true;
+        return root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Any(m => m.Identifier.Text == "Main" && m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.StaticKeyword)));
     }
 
     /// <summary>Expande el conjunto Windows por clases parciales (mismo tipo en varios ficheros) y por
     /// herencia (una clase que deriva de un tipo que quedó en Windows también va a Windows).</summary>
-    private static HashSet<string> ExpandWindowsSet(List<(string Abs, string Rel)> allCs, HashSet<string> winSet)
+    private HashSet<string> ExpandWindowsSet(List<(string Abs, string Rel)> allCs, HashSet<string> winSet)
     {
         var declaredByFile = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var basesByFile = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
@@ -638,9 +682,9 @@ public sealed class SolutionRewriter
         {
             var declared = new HashSet<string>(StringComparer.Ordinal);
             var bases = new HashSet<string>(StringComparer.Ordinal);
-            try
+            var root = RootCached(f.Abs);
+            if (root is not null)
             {
-                var root = CSharpSyntaxTree.ParseText(File.ReadAllText(f.Abs)).GetRoot();
                 foreach (var t in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
                 {
                     declared.Add(t.Identifier.Text);
@@ -650,7 +694,6 @@ public sealed class SolutionRewriter
                         foreach (var bt in t.BaseList.Types) bases.Add(BaseName(bt.Type));
                 }
             }
-            catch { /* ignorar */ }
             declaredByFile[f.Rel] = declared;
             basesByFile[f.Rel] = bases;
         }
