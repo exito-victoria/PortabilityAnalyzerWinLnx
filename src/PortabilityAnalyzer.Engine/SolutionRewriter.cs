@@ -131,7 +131,10 @@ public sealed class SolutionRewriter
                 RootNamespace = Prop(text, "RootNamespace")
             };
 
-            info.Excluded = excluded.Contains(name);
+            // Exclusión robusta: casa por nombre de ensamblado O por nombre del fichero .csproj (ignora
+            // mayúsculas). Así, aunque el <AssemblyName> difiera del nombre del proyecto, la lista funciona.
+            var csprojName = Path.GetFileNameWithoutExtension(csproj);
+            info.Excluded = excluded.Contains(name) || excluded.Contains(csprojName);
 
             // Ficheros del proyecto (código y contenido), excluyendo obj/bin y el .csproj.
             var allFiles = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
@@ -150,6 +153,13 @@ public sealed class SolutionRewriter
 
             infos.Add(info);
         }
+
+        // Avisar de entradas de --rewrite-exclude que no coinciden con NINGÚN proyecto (nombre mal escrito).
+        foreach (var e in excluded)
+            if (!infos.Any(i => string.Equals(i.Name, e, StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(Path.GetFileNameWithoutExtension(i.CsprojPath), e, StringComparison.OrdinalIgnoreCase)))
+                warnings.Add($"--rewrite-exclude: '{e}' no coincide con ningún proyecto de la solución y se ignora. " +
+                             $"Proyectos disponibles: {string.Join(", ", infos.Select(i => i.Name).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))}.");
 
         // 1b) PROPAGACIÓN TRANSITIVA de "Windows" por el grafo de tipos de TODA la solución (herencia + uso
         // de tipos, entre proyectos), sembrando desde ficheros con hallazgo y desde tipos base de WPF/WinForms.

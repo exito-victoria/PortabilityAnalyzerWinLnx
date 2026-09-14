@@ -167,16 +167,23 @@ internal static class Program
             {
                 var proyectos = new ProjectDiscovery().GetProjects(options.InputPath);
                 var slnName = Path.GetFileNameWithoutExtension(options.InputPath) + "-multiplataforma";
+                Log.Information("Reescritura: proyectos descubiertos ({N}): {Proyectos}",
+                    proyectos.Count, string.Join(", ", proyectos.Select(p => p.Name)));
                 try
                 {
-                    if (options.RewriteExclude.Count > 0)
-                        Log.Information("Reescritura: proyectos EXCLUIDOS de la separacion: {Excluidos}", string.Join(", ", options.RewriteExclude));
-                    var rewrite = new SolutionRewriter().Rewrite(slnName, proyectos, sourceFindings, Path.GetFullPath(options.RewriteDir), options.RewriteExclude);
-                    Log.Information("Reescritura multiplataforma: {N} proyecto(s) -> {Portable} portable, {Sep} separable(s), {Win} solo-Windows en {Dir}",
+                    // La exclusión de la reescritura sale de --rewrite-exclude Y de los "noModificables" del
+                    // fichero de roles (si se paso --roles): ambos significan "no separar, copiar entero".
+                    var rewriteExcludes = options.RewriteExclude.Concat(roles.NoModificables)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    if (rewriteExcludes.Count > 0)
+                        Log.Information("Reescritura: proyectos EXCLUIDOS solicitados: {Excluidos} (deben coincidir con un nombre de proyecto o de .csproj de arriba)", string.Join(", ", rewriteExcludes));
+                    var rewrite = new SolutionRewriter().Rewrite(slnName, proyectos, sourceFindings, Path.GetFullPath(options.RewriteDir), rewriteExcludes);
+                    Log.Information("Reescritura multiplataforma: {N} proyecto(s) -> {Portable} portable, {Sep} separable(s), {Win} solo-Windows, {Excl} excluido(s) en {Dir}",
                         rewrite.Projects.Count,
                         rewrite.Projects.Count(p => p.Kind == "Portable"),
                         rewrite.Projects.Count(p => p.Kind == "Separable"),
                         rewrite.Projects.Count(p => p.Kind == "SoloWindows"),
+                        rewrite.Projects.Count(p => p.Kind == "Excluido"),
                         rewrite.OutputDir);
                     Log.Information("Solucion reescrita: {Sln}", rewrite.SolutionFile);
                     foreach (var w in rewrite.Warnings) Log.Warning("Reescritura: {Aviso}", w);

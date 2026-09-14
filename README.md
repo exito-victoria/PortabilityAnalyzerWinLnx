@@ -60,6 +60,7 @@ PortabilityAnalyzer.Cli \
   --output  salida/informe.docx \
   --format  word,markdown \
   --executive \
+  [--rewrite <carpeta-salida>] [--rewrite-exclude <p1,p2,...>] \
   [--assume-third-party] [--third-party-factor <n>] [--testing-factor <n>]
 ```
 
@@ -71,6 +72,8 @@ PortabilityAnalyzer.Cli \
 | `--output` | Ruta del informe. La carpeta se **crea si no existe**. |
 | `--format` | `json` (por defecto), `markdown`, `word`, `all`, o lista por comas (`word,markdown`). Con varios, la extensión de cada fichero se deriva de `--output`. |
 | `--executive` | Genera además el **informe ejecutivo** `InformeEjec_<proyecto>.docx` en la misma carpeta. |
+| `--rewrite <dir>` | **Reescribe la solución completa** a multiplataforma en `<dir>` (proyectos `net8.0` + `net8.0-windows`). Debe estar **fuera** de la solución original. Ver ["Reescritura completa"](#reescritura-completa-de-la-solución---rewrite). |
+| `--rewrite-exclude <lista>` | Proyectos que **NO** se separan (se copian enteros), separados por comas. Casa por **nombre de proyecto o de `.csproj`** (ignora mayúsculas). También se toman los `noModificables` del `--roles`. |
 | `--assume-third-party` | Aplica el factor de incertidumbre a todos los ensamblados (para directorio/DLL sueltos). |
 | `--third-party-factor <n>` | Fija el factor (>0; implica `--assume-third-party`; 1.5 por defecto). |
 | `--testing-factor <n>` | Fracción del esfuerzo imputada a Pruebas y CI (0.25 por defecto). |
@@ -132,6 +135,60 @@ en una subcarpeta dedicada **`proyectos-separados/`** (nunca colisiona con el c�
 
 Los proyectos generados **compilan** (validado); quedan listos a falta de conectar los seams y probar.
 
+## Reescritura completa de la solución (`--rewrite`)
+
+A diferencia del *split* por-proyecto (basado en `--roles`), **`--rewrite`** reescribe la **solución entera**
+a una **solución nueva hermana** (nunca toca la original) donde **todos** los proyectos se separan según sus
+dependencias de Windows. Si se pasa `--rewrite`, **NO** se genera el scaffold antiguo (`proyectos-separados/` +
+`SPLIT-NOTES`): la reescritura lo sustituye.
+
+Cada proyecto se clasifica y emite así:
+
+- **Portable** (sin dependencias de Windows) → un único proyecto `net8.0`. Los que ya eran `net8.0` (p. ej.
+  los `*Multi`) se copian **sin cambios**; solo se separan si tienen dependencias reales de Windows.
+- **Separable** → `X.Core` (`net8.0`, portable) + `X.Windows` (`net8.0-windows`).
+- **SoloWindows** (todo depende de Windows: UI / punto de entrada) → `net8.0-windows`.
+- **Excluido** (en `--rewrite-exclude` o en `noModificables`) → se **copia entero**, sin separar.
+
+Qué hace, ya **implementado** (no son TODOs):
+
+- **Propagación transitiva de "Windows"** por el grafo de tipos de **toda la solución** (herencia **y uso** de
+  tipos, **entre proyectos**), sembrando desde los hallazgos y desde los tipos base de WPF/WinForms
+  (`Freezable`, `DependencyObject`, `Window`…). Un fichero que —directa o transitivamente— necesita un tipo de
+  Windows acaba en `.Windows`; así el `.Core` queda **realmente portable**. Ej.: si `DBHandler` tiene un campo
+  de un tipo de otro proyecto que es de Windows, o si `MessageItem → BDUtils → ViewModels → ViewModelBase`,
+  todos van a `.Windows`.
+- **Seams automáticos con DI**: cuando un fichero portable del núcleo solo usa una clase Windows **del mismo
+  proyecto** de forma inyectable (campo privado `new T()`), se extrae su **interfaz** al núcleo, la clase Windows
+  la implementa, y el consumidor la recibe **por constructor**. Se genera el **registro DI**
+  `SeamRegistration.AddWindowsSeams()` en el proyecto `.Windows` (solo falta invocarlo en el arranque).
+- **Referencias recableadas**: `.Core` solo referencia núcleos portables; `.Windows` referencia su `.Core` y las
+  partes `.Windows`; los **proyectos externos** a la solución se conservan apuntando a su `.csproj` original; los
+  **excluidos** referencian el lado `.Windows` (superset).
+- **Orden de compilación reconstruido** de la solución generada (topológico por `ProjectReference`), en `MIGRACION.md`.
+- **`MIGRACION.md`**: resumen de **lo implementado** (clasificación por proyecto, seams aplicados, referencias,
+  orden de compilación, avisos).
+
+> Los `noModificables` del `--roles` se toman también como exclusiones de la reescritura. El resto de roles
+> (`obligatorioMultiplataforma`, `divisiblePorUI`, `separables`) **no** afectan a `--rewrite` (son del *split* antiguo).
+
+### Ejemplo completo (reescritura)
+
+```bash
+"C:\Program Files\dotnet\dotnet.exe" run --project src/PortabilityAnalyzer.Cli -- \
+  --path    "C:\ruta\a\SolucionCliente.sln" \
+  --rules   rules/reglas_portabilidad_windows_linux.json \
+  --schema  rules/portability-rules.schema.json \
+  --rewrite "C:\salida\SolucionCliente-multiplataforma" \
+  --rewrite-exclude "Proyecto1.Common,Proyecto1.Contracts,Proyecto1.DataModel,Proyecto1.Engine,Proyecto1.Oracle,Proyecto1.WebUI"
+```
+
+- Los nombres de `--rewrite-exclude` deben coincidir con un **nombre de proyecto** o de **`.csproj`** de la
+  solución (ignora mayúsculas). Al arrancar, la app **lista los proyectos descubiertos** y **avisa** de cualquier
+  nombre de la lista que **no** coincida (mostrando los disponibles) — úsalo para copiar los nombres exactos.
+- Apunta siempre al **`.sln`** (no a un `.csproj` suelto) para que las referencias entre proyectos se recableen.
+- `--rewrite` debe estar **fuera** de la carpeta de la solución original.
+
 ## Cómo funciona
 
 1. **Clasificación** de cada ensamblado (gestionado / nativo / Windows-BCL omitido / ilegible).
@@ -150,8 +207,11 @@ Los proyectos generados **compilan** (validado); quedan listos a falta de conect
 
 - El descubrimiento `.sln`/`.csproj` casa por **nombre de ensamblado**; no resuelve `ProjectReference`
   transitivas ni la salida exacta por configuración.
-- La separación por método cubre **métodos** (no propiedades/constructores); el resto queda documentado.
-- Al separar, las **referencias a otros proyectos** de la solución hay que reañadirlas (queda anotado en el `SPLIT-NOTES`).
+- La separación por método (del *split* antiguo) cubre **métodos** (no propiedades/constructores); el resto queda documentado.
+- En el *split* antiguo (`--roles`), las **referencias a otros proyectos** hay que reañadirlas a mano. En la
+  **reescritura completa** (`--rewrite`) las referencias se **recablean automáticamente** entre los proyectos generados.
+- La propagación de "Windows" en `--rewrite` es **sintáctica** (por nombres de tipo, sin modelo semántico): puede
+  ser **conservadora** (llevar de más al lado `.Windows`), lo cual es seguro para la portabilidad del núcleo.
 - Los esfuerzos del catálogo son **semilla orientativa**: recalibrar con datos reales.
 
 ---
