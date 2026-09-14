@@ -169,7 +169,9 @@ internal static class Program
                 var slnName = Path.GetFileNameWithoutExtension(options.InputPath) + "-multiplataforma";
                 try
                 {
-                    var rewrite = new SolutionRewriter().Rewrite(slnName, proyectos, sourceFindings, Path.GetFullPath(options.RewriteDir));
+                    if (options.RewriteExclude.Count > 0)
+                        Log.Information("Reescritura: proyectos EXCLUIDOS de la separacion: {Excluidos}", string.Join(", ", options.RewriteExclude));
+                    var rewrite = new SolutionRewriter().Rewrite(slnName, proyectos, sourceFindings, Path.GetFullPath(options.RewriteDir), options.RewriteExclude);
                     Log.Information("Reescritura multiplataforma: {N} proyecto(s) -> {Portable} portable, {Sep} separable(s), {Win} solo-Windows en {Dir}",
                         rewrite.Projects.Count,
                         rewrite.Projects.Count(p => p.Kind == "Portable"),

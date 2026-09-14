@@ -78,11 +78,15 @@ public sealed class SolutionRewriter
         public string? RootNamespace;
         public List<string> RefNames = new();            // referencias a otros proyectos de la solución
         public List<(string AbsCsproj, bool Portable)> ExternalRefs = new(); // referencias a proyectos externos
+        public List<(string Abs, string Rel)> CodeFiles = new();     // todos los .cs (sin clasificar)
+        public List<(string Abs, string Rel)> ContentFiles = new();  // no-.cs (xaml/resx/...)
+        public HashSet<string> FindingFiles = new(StringComparer.OrdinalIgnoreCase); // .cs con hallazgo directo
         public List<(string Abs, string Rel)> WinCode = new();
         public List<(string Abs, string Rel)> PortableCode = new();
         public List<(string Abs, string Rel)> WinContent = new();
         public List<(string Abs, string Rel)> PortableContent = new();
         public bool HasEntryPoint;
+        public bool Excluded;             // en la lista de exclusión: se copia entero, sin separar
         public Kind Kind;
 
         // Identidades de salida (rellenadas tras clasificar).
@@ -92,9 +96,10 @@ public sealed class SolutionRewriter
     }
 
     public RewriteResult Rewrite(string solutionName, IReadOnlyList<(string Name, string Dir)> projects,
-        IReadOnlyList<SourceFinding> findings, string outputDir)
+        IReadOnlyList<SourceFinding> findings, string outputDir, IReadOnlyList<string>? excludeProjects = null)
     {
         var warnings = new List<string>();
+        var excluded = new HashSet<string>(excludeProjects ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
         // 1) Cargar info de cada proyecto y clasificar sus ficheros.
         var infos = new List<ProjInfo>();
@@ -126,37 +131,50 @@ public sealed class SolutionRewriter
                 RootNamespace = Prop(text, "RootNamespace")
             };
 
+            info.Excluded = excluded.Contains(name);
+
             // Ficheros del proyecto (código y contenido), excluyendo obj/bin y el .csproj.
             var allFiles = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
                 .Where(p => !IsObjBin(p, dir) && !p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) && !IsVsJunk(p))
                 .Select(p => (Abs: p, Rel: Path.GetRelativePath(dir, p)))
                 .ToList();
-            var codeFiles = allFiles.Where(f => f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
-            var contentFiles = allFiles.Where(f => !f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+            info.CodeFiles = allFiles.Where(f => f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+            info.ContentFiles = allFiles.Where(f => !f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
 
-            // Semilla de ficheros Windows: los que tienen hallazgo + code-behind de XAML + punto de entrada.
-            var winSeed = findings.Where(f => string.Equals(f.Project, name, StringComparison.OrdinalIgnoreCase))
+            // Ficheros con hallazgo directo del catálogo + punto de entrada (se calcula la clasificación
+            // después, tras la propagación de "Windows" por TODA la solución).
+            info.FindingFiles = findings.Where(f => string.Equals(f.Project, name, StringComparison.OrdinalIgnoreCase))
                 .Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var f in codeFiles)
-            {
-                if (f.Rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)) winSeed.Add(f.Rel);
-                if (IsEntryPoint(f.Abs)) { winSeed.Add(f.Rel); info.HasEntryPoint = true; }
-            }
-            var winSet = ExpandWindowsSet(codeFiles, winSeed);
+            foreach (var f in info.CodeFiles)
+                if (IsEntryPoint(f.Abs)) { info.HasEntryPoint = true; break; }
 
-            info.WinCode = codeFiles.Where(f => winSet.Contains(f.Rel)).ToList();
-            info.PortableCode = codeFiles.Where(f => !winSet.Contains(f.Rel)).ToList();
-            var (winContent, portContent) = ClassifyContent(contentFiles, info.WinCode, info.PortableCode);
+            infos.Add(info);
+        }
+
+        // 1b) PROPAGACIÓN TRANSITIVA de "Windows" por el grafo de tipos de TODA la solución (herencia + uso
+        // de tipos, entre proyectos), sembrando desde ficheros con hallazgo y desde tipos base de WPF/WinForms.
+        // Un fichero acaba en Windows si (transitivamente) necesita un tipo de Windows.
+        var winTypes = ComputeWindowsTypes(infos);
+
+        // 1c) Clasificar los ficheros de cada proyecto NO excluido usando el conjunto global de tipos Windows.
+        foreach (var info in infos)
+        {
+            if (info.Excluded) continue; // los excluidos se copian enteros, sin separar
+            var winSeed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in info.CodeFiles)
+                if (FileTouchesWindows(f.Abs, f.Rel, info, winTypes)) winSeed.Add(f.Rel);
+            var winSet = ExpandWindowsSet(info.CodeFiles, winSeed); // + clases parciales/herencia dentro del proyecto
+
+            info.WinCode = info.CodeFiles.Where(f => winSet.Contains(f.Rel)).ToList();
+            info.PortableCode = info.CodeFiles.Where(f => !winSet.Contains(f.Rel)).ToList();
+            var (winContent, portContent) = ClassifyContent(info.ContentFiles, info.WinCode, info.PortableCode);
             info.WinContent = winContent;
             info.PortableContent = portContent;
 
-            // Clasificación del proyecto.
             bool hasWin = info.WinCode.Count > 0 || info.UseWpf || info.UseWinForms;
-            if (!hasWin) { info.Kind = Kind.Portable; }
-            else if (info.PortableCode.Count > 0) { info.Kind = Kind.Separable; }
-            else { info.Kind = Kind.WindowsOnly; }
-
-            infos.Add(info);
+            if (!hasWin) info.Kind = Kind.Portable;
+            else if (info.PortableCode.Count > 0) info.Kind = Kind.Separable;
+            else info.Kind = Kind.WindowsOnly;
         }
 
         // 2) Resolver referencias a proyectos de la solución (por nombre).
@@ -236,6 +254,26 @@ public sealed class SolutionRewriter
 
         foreach (var info in infos)
         {
+            // Proyecto EXCLUIDO: se copia ENTERO (sin separar), preservando su TFM y OutputType. Sus
+            // referencias a proyectos separados apuntan al lado .Windows (superset). Se corrige después.
+            if (info.Excluded)
+            {
+                var outName = info.Name;
+                var projDir = Path.Combine(outputDir, outName);
+                CopyCode(info.CodeFiles, info.Dir, projDir, outName);
+                CopyContent(info.ContentFiles, projDir);
+                var refs = info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList();
+                var relPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
+                var tfm = string.IsNullOrWhiteSpace(info.Tfm) ? "net8.0-windows" : info.Tfm!;
+                WriteCsproj(Path.Combine(projDir, outName + ".csproj"), tfm, info.PackageLines, info.UseWpf, info.UseWinForms,
+                    info.OutputType, refs, relPaths, windowsOnlyFilter: false, source: info);
+                emitted.Add((outName, $"{outName}\\{outName}.csproj"));
+                rewritten.Add(new RewrittenProject(info.Name, "Excluido",
+                    $"En la lista de exclusión: copiado entero sin separar (TFM {tfm})",
+                    new[] { outName }, 0, info.CodeFiles.Count));
+                continue;
+            }
+
             switch (info.Kind)
             {
                 case Kind.Portable:
@@ -285,7 +323,7 @@ public sealed class SolutionRewriter
 
                     // Pase de seams: intenta mantener en el núcleo los ficheros portables que dependen de
                     // clases Windows, extrayendo una interfaz e inyectándola por constructor.
-                    var seam = RunSeamPass(info);
+                    var seam = RunSeamPass(info, winTypes);
                     warnings.AddRange(seam.Warnings);
                     foreach (var s in seam.Seams) allSeams.Add((info.Name, s.Concrete, s.Interface, s.Namespace));
 
@@ -335,10 +373,11 @@ public sealed class SolutionRewriter
             }
         }
 
-        // 5) Generar el .sln y el README de migración.
+        // 5) Generar el .sln, reconstruir el orden de compilación y el README de migración.
         var slnPath = Path.Combine(outputDir, solutionName + ".sln");
         WriteSolution(slnPath, emitted);
-        WriteMigrationReadme(Path.Combine(outputDir, "MIGRACION.md"), solutionName, rewritten, warnings, allSeams);
+        var buildOrder = ComputeBuildOrder(outputDir, emitted);
+        WriteMigrationReadme(Path.Combine(outputDir, "MIGRACION.md"), solutionName, rewritten, warnings, allSeams, buildOrder);
 
         return new RewriteResult
         {
@@ -431,7 +470,7 @@ public sealed class SolutionRewriter
         public List<string> Warnings = new();
     }
 
-    private SeamPassResult RunSeamPass(ProjInfo info)
+    private SeamPassResult RunSeamPass(ProjInfo info, HashSet<string> winTypes)
     {
         var res = new SeamPassResult { Portable = info.PortableCode.ToList(), Win = info.WinCode.ToList() };
 
@@ -455,33 +494,37 @@ public sealed class SolutionRewriter
             return p;
         }
 
-        foreach (var f in info.PortableCode)
+        // RECUPERACIÓN al núcleo: un fichero que quedó en Windows SOLO porque usa clases Windows del MISMO
+        // proyecto de forma inyectable (campo privado `new T()`), se devuelve al núcleo extrayendo su interfaz
+        // e inyectándola por constructor. Todo lo demás (hallazgo propio, herencia de base Windows, punto de
+        // entrada, XAML, o uso de tipos Windows cross-project / no inyectables) se queda en Windows.
+        foreach (var f in info.WinCode)
         {
-            var root = RootCached(f.Abs);
-            if (root is null) continue;
-            var content = ReadTextCached(f.Abs);
+            if (info.FindingFiles.Contains(f.Rel)) continue;                 // dependencia Windows propia
+            if (f.Rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)) continue;
+            if (IsEntryPoint(f.Abs)) continue;                                // punto de entrada
+            var ft = FileTypesOf(f.Abs);
+            if (ft.DerivesWinBase) continue;                                  // es un tipo Windows por herencia
 
-            var declaredHere = root.DescendantNodes().OfType<TypeDeclarationSyntax>().Select(t => t.Identifier.Text).ToHashSet(StringComparer.Ordinal);
-            var used = root.DescendantNodes().OfType<IdentifierNameSyntax>().Select(id => id.Identifier.Text)
-                .Where(n => winTypeToFile.ContainsKey(n) && !declaredHere.Contains(n)).Distinct().ToList();
-            if (used.Count == 0) continue; // sin referencia cruzada: se queda portable tal cual
+            var content = ReadTextCached(f.Abs);
+            // Tipos Windows (globales) que referencia este fichero, sin contar los que declara él mismo.
+            var winRefs = ft.Referenced.Where(n => winTypes.Contains(n) && !ft.Declared.Contains(n)).Distinct().ToList();
+            if (winRefs.Count == 0) continue; // Windows por otra razón; no se recupera
+            // Solo se puede recuperar si TODAS sus referencias Windows son clases del MISMO proyecto (seamables).
+            if (winRefs.Any(n => !winTypeToFile.ContainsKey(n))) continue;    // hay refs cross-project/no-clase
 
             var map = new Dictionary<string, string>(StringComparer.Ordinal);
             bool allExtractable = true;
-            foreach (var t in used) { var pl = PlanFor(t); if (pl is null) { allExtractable = false; break; } map[t] = pl.InterfaceName; }
-            var rewritten = allExtractable ? SeamWeaver.TryInjectConstructor(content, map) : null;
+            foreach (var t in winRefs) { var pl = PlanFor(t); if (pl is null) { allExtractable = false; break; } map[t] = pl.InterfaceName; }
+            if (!allExtractable) continue;
+            var rewritten = SeamWeaver.TryInjectConstructor(content, map);
+            if (rewritten is null) continue; // no inyectable de forma segura: se queda en Windows
 
-            if (rewritten is null)
-            {
-                // No inyectable de forma segura: mover el fichero al proyecto Windows (fallback) y avisar.
-                res.Portable.RemoveAll(x => string.Equals(x.Rel, f.Rel, StringComparison.OrdinalIgnoreCase));
-                if (!res.Win.Any(x => string.Equals(x.Rel, f.Rel, StringComparison.OrdinalIgnoreCase))) res.Win.Add(f);
-                res.Warnings.Add($"'{info.Name}': '{f.Rel}' usa tipos Windows ({string.Join(", ", used)}) de forma no inyectable automáticamente; se movió a {info.WinName}. Revisar para introducir un seam a mano.");
-                continue;
-            }
-
+            // Recuperar el fichero al núcleo.
+            res.Win.RemoveAll(x => string.Equals(x.Rel, f.Rel, StringComparison.OrdinalIgnoreCase));
+            if (!res.Portable.Any(x => string.Equals(x.Rel, f.Rel, StringComparison.OrdinalIgnoreCase))) res.Portable.Add(f);
             res.CoreOverrides[f.Rel] = rewritten;
-            foreach (var t in used)
+            foreach (var t in winRefs)
             {
                 if (res.Seams.Any(s => s.Concrete == t)) continue;
                 var pl = PlanFor(t)!;
@@ -630,6 +673,48 @@ public sealed class SolutionRewriter
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
     }
 
+    /// <summary>Reconstruye el orden de compilación de la solución GENERADA: lee las ProjectReference de
+    /// cada .csproj emitido, resuelve el grafo entre los proyectos generados y lo ordena por niveles
+    /// topológicos (Kahn). Los del mismo nivel no dependen entre sí. Devuelve (nivel, nombre) ordenado.</summary>
+    private static List<(int Level, string Name)> ComputeBuildOrder(string outputDir, IReadOnlyList<(string Name, string RelCsproj)> emitted)
+    {
+        var names = emitted.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var deps = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, rel) in emitted)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var text = File.ReadAllText(Path.Combine(outputDir, rel));
+                foreach (Match m in ProjectReferenceInclude.Matches(text))
+                {
+                    var refName = Path.GetFileNameWithoutExtension(m.Groups[1].Value.Replace('\\', '/'));
+                    if (names.Contains(refName) && !string.Equals(refName, name, StringComparison.OrdinalIgnoreCase)) set.Add(refName);
+                }
+            }
+            catch { /* ignorar */ }
+            deps[name] = set;
+        }
+
+        var level = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var indegree = deps.ToDictionary(kv => kv.Key, kv => kv.Value.Count, StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>(indegree.Where(kv => kv.Value == 0).Select(kv => kv.Key).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+        foreach (var n in queue) level[n] = 0;
+        var ordered = new List<string>();
+        while (queue.Count > 0)
+        {
+            var n = queue.Dequeue(); ordered.Add(n);
+            foreach (var m in deps.Where(kv => kv.Value.Contains(n)).Select(kv => kv.Key))
+            {
+                level[m] = Math.Max(level.TryGetValue(m, out var lv) ? lv : 0, level[n] + 1);
+                if (--indegree[m] == 0) queue.Enqueue(m);
+            }
+        }
+        // Los que queden (ciclo) se añaden al final con su nivel actual.
+        foreach (var n in deps.Keys) if (!ordered.Contains(n)) { ordered.Add(n); level[n] = level.TryGetValue(n, out var lv) ? lv : 0; }
+        return ordered.OrderBy(n => level[n]).ThenBy(n => n, StringComparer.OrdinalIgnoreCase).Select(n => (level[n], n)).ToList();
+    }
+
     /// <summary>GUID estable derivado del nombre (para que el .sln sea reproducible).</summary>
     private static string DeterministicGuid(string name)
     {
@@ -639,7 +724,8 @@ public sealed class SolutionRewriter
     }
 
     private static void WriteMigrationReadme(string path, string solutionName, IReadOnlyList<RewrittenProject> projects,
-        IReadOnlyList<string> warnings, IReadOnlyList<(string Project, string Concrete, string Interface, string Namespace)> seams)
+        IReadOnlyList<string> warnings, IReadOnlyList<(string Project, string Concrete, string Interface, string Namespace)> seams,
+        IReadOnlyList<(int Level, string Name)> buildOrder)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {solutionName} — solución reescrita a multiplataforma");
@@ -698,6 +784,18 @@ public sealed class SolutionRewriter
         {
             sb.AppendLine("## Avisos (revisar)");
             foreach (var w in warnings) sb.AppendLine($"- {w}");
+            sb.AppendLine();
+        }
+
+        if (buildOrder.Count > 0)
+        {
+            sb.AppendLine("## Orden de compilación reconstruido (solución generada)");
+            sb.AppendLine();
+            sb.AppendLine("Tras separar y recablear, este es el orden topológico por `ProjectReference` (los proyectos");
+            sb.AppendLine("del mismo nivel no dependen entre sí y pueden compilarse en paralelo):");
+            sb.AppendLine();
+            foreach (var g in buildOrder.GroupBy(x => x.Level).OrderBy(g => g.Key))
+                sb.AppendLine($"{g.Key + 1}. {string.Join(", ", g.Select(x => x.Name).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))}");
             sb.AppendLine();
         }
 
@@ -829,6 +927,110 @@ public sealed class SolutionRewriter
         QualifiedNameSyntax q => q.Right.Identifier.Text,
         _ => t.ToString()
     };
+
+    // ---------------------------------------------------------------------------------------------
+    // Propagación transitiva de "Windows" por el grafo de tipos de TODA la solución.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>Tipos base del framework que atan una clase a Windows (WPF/WinForms). Heredar de ellos
+    /// (directa o transitivamente) hace que el tipo —y sus consumidores— sean de Windows.</summary>
+    private static readonly HashSet<string> WindowsFrameworkBases = new(StringComparer.Ordinal)
+    {
+        "Window", "Form", "UserControl", "Control", "Page", "Application", "DependencyObject",
+        "FrameworkElement", "ContentControl", "ContainerControl", "ScrollableControl", "CommonDialog",
+        "NativeWindow", "ApplicationContext", "Freezable", "DispatcherObject", "Visual", "UIElement",
+        "Dispatcher", "DrawingVisual", "HwndHost"
+    };
+
+    private readonly Dictionary<string, (HashSet<string> Declared, HashSet<string> Referenced, bool DerivesWinBase)> _fileTypes
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Tipos declarados y tipos referenciados (heurística sintáctica) de un fichero .cs, con caché.</summary>
+    private (HashSet<string> Declared, HashSet<string> Referenced, bool DerivesWinBase) FileTypesOf(string abs)
+    {
+        if (_fileTypes.TryGetValue(abs, out var cached)) return cached;
+        var declared = new HashSet<string>(StringComparer.Ordinal);
+        var referenced = new HashSet<string>(StringComparer.Ordinal);
+        bool derivesWinBase = false;
+        var root = RootCached(abs);
+        if (root is not null)
+        {
+            foreach (var t in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+            {
+                declared.Add(t.Identifier.Text);
+                if (t.BaseList is not null)
+                    foreach (var bt in t.BaseList.Types)
+                    {
+                        var bn = BaseName(bt.Type);
+                        referenced.Add(bn);
+                        if (WindowsFrameworkBases.Contains(bn)) derivesWinBase = true;
+                    }
+            }
+            foreach (var n in root.DescendantNodes())
+            {
+                switch (n)
+                {
+                    case QualifiedNameSyntax q when q.Parent is not QualifiedNameSyntax:
+                        referenced.Add(q.Right.Identifier.Text); break;
+                    case GenericNameSyntax g:
+                        referenced.Add(g.Identifier.Text); break;
+                    case IdentifierNameSyntax id:
+                        if (id.Parent is QualifiedNameSyntax) break;                 // parte de A.B (tratado arriba)
+                        if (id.Parent is MemberAccessExpressionSyntax ma && ma.Name == id) break; // miembro .X, no tipo
+                        referenced.Add(id.Identifier.Text); break;
+                }
+            }
+        }
+        var result = (declared, referenced, derivesWinBase);
+        _fileTypes[abs] = result;
+        return result;
+    }
+
+    /// <summary>Conjunto de nombres de tipo (simples) que son de Windows en TODA la solución: se siembra con
+    /// los ficheros con hallazgo directo y los que heredan de un tipo base de Windows, y se propaga por
+    /// herencia y uso de tipos hasta punto fijo (un tipo que use un tipo Windows es también de Windows).</summary>
+    private HashSet<string> ComputeWindowsTypes(List<ProjInfo> infos)
+    {
+        var all = new List<(string Abs, string Rel, ProjInfo Info)>();
+        foreach (var info in infos)
+            foreach (var f in info.CodeFiles)
+                all.Add((f.Abs, f.Rel, info));
+
+        var winTypes = new HashSet<string>(StringComparer.Ordinal);
+        // Semilla.
+        foreach (var (abs, rel, info) in all)
+        {
+            var ft = FileTypesOf(abs);
+            if (info.FindingFiles.Contains(rel) || ft.DerivesWinBase) winTypes.UnionWith(ft.Declared);
+        }
+        // Propagación a punto fijo.
+        bool changed = true; int guard = 0;
+        while (changed && guard++ < 100)
+        {
+            changed = false;
+            foreach (var (abs, rel, info) in all)
+            {
+                var ft = FileTypesOf(abs);
+                bool win = info.FindingFiles.Contains(rel) || ft.DerivesWinBase
+                           || ft.Declared.Overlaps(winTypes) || ft.Referenced.Overlaps(winTypes);
+                if (win)
+                    foreach (var t in ft.Declared)
+                        if (winTypes.Add(t)) changed = true;
+            }
+        }
+        return winTypes;
+    }
+
+    /// <summary>True si el fichero debe ir al lado Windows: hallazgo directo, code-behind XAML, punto de
+    /// entrada, hereda de un tipo base de Windows, o declara/usa (transitivamente) un tipo de Windows.</summary>
+    private bool FileTouchesWindows(string abs, string rel, ProjInfo info, HashSet<string> winTypes)
+    {
+        if (info.FindingFiles.Contains(rel)) return true;
+        if (rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)) return true;
+        if (IsEntryPoint(abs)) return true;
+        var ft = FileTypesOf(abs);
+        return ft.DerivesWinBase || ft.Declared.Overlaps(winTypes) || ft.Referenced.Overlaps(winTypes);
+    }
 
     private static void RecreateDir(string dir)
     {

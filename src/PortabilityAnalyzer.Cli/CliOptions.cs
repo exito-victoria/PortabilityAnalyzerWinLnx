@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace PortabilityAnalyzer.Cli;
 
@@ -40,9 +40,13 @@ internal sealed class CliOptions
     /// separados en net8.0 (portable) y net8.0-windows. Debe estar FUERA de la carpeta de la solucion.</summary>
     public string? RewriteDir { get; init; }
 
+    /// <summary>Proyectos que NO se separan en la reescritura (se copian enteros): componentes que no
+    /// interesa separar todavía (flag <c>--rewrite-exclude p1,p2,p3</c>).</summary>
+    public IReadOnlyList<string> RewriteExclude { get; init; } = Array.Empty<string>();
+
     public static CliOptions? Parse(string[] args)
     {
-        string? input = null, rules = null, schema = null, output = null, format = null, rolesPath = null, rewriteDir = null;
+        string? input = null, rules = null, schema = null, output = null, format = null, rolesPath = null, rewriteDir = null, rewriteExclude = null;
         bool assumeThirdParty = false;
         bool executive = false;
         double thirdPartyFactor = 1.5;
@@ -69,6 +73,7 @@ internal sealed class CliOptions
                     break;
 
                 case "--rewrite": rewriteDir = Next(args, ref i); break;
+                case "--rewrite-exclude": rewriteExclude = Next(args, ref i); break;
 
                 case "--third-party-factor":
                     var raw = Next(args, ref i);
@@ -105,7 +110,9 @@ internal sealed class CliOptions
             ThirdPartyFactor = thirdPartyFactor,
             TestingFactor = testingFactor,
             Executive = executive,
-            RewriteDir = rewriteDir
+            RewriteDir = rewriteDir,
+            RewriteExclude = (rewriteExclude ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         };
     }
 
@@ -150,6 +157,7 @@ internal sealed class CliOptions
             "                            de cada uno se deriva de --output cuando se piden varios)." + Environment.NewLine +
             "  --executive               Genera ademas el informe ejecutivo InformeEjec_<proyecto>.docx (resumen para el cliente)." + Environment.NewLine +
             "  --rewrite <dir>           Reescribe la solucion completa a multiplataforma en <dir> (proyectos net8.0 + net8.0-windows)." + Environment.NewLine +
+            "  --rewrite-exclude <lista> Proyectos a NO separar (se copian enteros), separados por comas (p. ej. proyecto01,proyecto02)." + Environment.NewLine +
             "  --assume-third-party      Aplica un factor de incertidumbre (x1.5 por defecto) a todos los ensamblados." + Environment.NewLine +
             "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party." + Environment.NewLine +
             "  --testing-factor <n>      Fraccion del esfuerzo de desarrollo imputada a Pruebas y CI (por defecto 0.25).");
