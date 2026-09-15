@@ -108,7 +108,10 @@ public sealed class ExecutiveWordExporter : IReportExporter
             var role = report.Roles.RoleOf(a.Classification.Name);
             var esProyecto = projectSet.Contains(a.Classification.Name)
                              || role is ProjectRole.ObligatorioMultiplataforma or ProjectRole.DivisiblePorUI;
-            var clase = esProyecto ? _t.ClsProject : _t.ClsThirdParty;
+            // Propio por AUTOR (EADS/Airbus) pero sin código fuente en la solución analizada: no es tercero,
+            // pero hay que indicar que no se dispone del código (estimación a partir del IL).
+            var propioSinFuente = !esProyecto && !a.IsThirdParty && role != ProjectRole.NoModificable;
+            var clase = (esProyecto || propioSinFuente) ? _t.ClsProject : _t.ClsThirdParty;
             var origen = esProyecto
                 ? role switch
                 {
@@ -116,6 +119,7 @@ public sealed class ExecutiveWordExporter : IReportExporter
                     ProjectRole.DivisiblePorUI => _t.OrigOwnDivisible,
                     _ => _t.OrigOwn
                 }
+                : propioSinFuente ? $"{AuthorOf(a.Classification.Path)} — {_t.SourceNotAvailable}"
                 : role == ProjectRole.NoModificable ? _t.OrigNoMod(AuthorOf(a.Classification.Path)) : AuthorOf(a.Classification.Path);
             var blockers = a.ConfirmedFindings().Count(f => f.EsBloqueante);
             var esfuerzo = role == ProjectRole.NoModificable
@@ -139,8 +143,12 @@ public sealed class ExecutiveWordExporter : IReportExporter
         {
             if (File.Exists(assemblyPath))
             {
-                var company = System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath).CompanyName?.Trim();
-                if (!string.IsNullOrWhiteSpace(company)) return company!;
+                var fi = System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath);
+                // El autor propio suele venir en CompanyName, pero en ensamblados antiguos aparece SOLO en el
+                // copyright (p. ej. "Copyright © EADS 2017"); por eso se cae al copyright/producto si hace falta.
+                var author = new[] { fi.CompanyName, fi.LegalCopyright, fi.ProductName }
+                    .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim();
+                if (!string.IsNullOrWhiteSpace(author)) return author!;
             }
         }
         catch { /* sin metadatos legibles */ }

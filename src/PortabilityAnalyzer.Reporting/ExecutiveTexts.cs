@@ -53,6 +53,8 @@ public sealed class ExecTexts
     public required string ColBlk { get; init; }
     public required string ColEffort { get; init; }
     public required string UnknownThirdParty { get; init; }
+    /// <summary>Nota para ensamblados propios (EADS/Airbus) sin código fuente en la solución analizada.</summary>
+    public required string SourceNotAvailable { get; init; }
     public required Func<Severity, string> Sev { get; init; }
 
     // Coste por bloque
@@ -135,6 +137,7 @@ public sealed class ExecTexts
         ColBlk = "Bloq.",
         ColEffort = "Esfuerzo O / M / P (h)",
         UnknownThirdParty = "Tercero (autor desconocido)",
+        SourceNotAvailable = "propio (EADS/Airbus); código fuente no disponible en la solución analizada",
         Sev = s => s.ToString(),
 
         HCost = "Coste por bloque de trabajo",
@@ -225,6 +228,7 @@ public sealed class ExecTexts
         ColBlk = "Blk.",
         ColEffort = "Effort O / M / P (h)",
         UnknownThirdParty = "Third party (unknown author)",
+        SourceNotAvailable = "own (EADS/Airbus); source code not available in the analyzed solution",
         Sev = SeverityEn,
 
         HCost = "Cost by work block",
