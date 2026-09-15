@@ -75,8 +75,29 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
         return assemblies
             .Select(p => new AssemblyRef(
                 p,
-                IsThirdParty: !firstPartyNames.Contains(System.IO.Path.GetFileNameWithoutExtension(p))))
+                // Es de terceros salvo que (a) su nombre corresponda a un proyecto de la solucion o
+                // (b) su AUTOR sea uno de los nuestros (EADS / Airbus Group): en ese caso es PROPIO y
+                // modificable, aunque no sea un proyecto de la solucion analizada.
+                IsThirdParty: !firstPartyNames.Contains(System.IO.Path.GetFileNameWithoutExtension(p))
+                              && !IsOwnedByKnownAuthor(p)))
             .ToList();
+    }
+
+    /// <summary>Autores cuyos ensamblados se consideran PROPIOS (modificables), aunque no sean un proyecto
+    /// de la solucion: se comparan (sin distinguir mayusculas, por subcadena) contra el CompanyName del DLL.</summary>
+    private static readonly string[] OwnAuthorMarkers = { "EADS", "Airbus" };
+
+    /// <summary>True si el autor (CompanyName) del ensamblado es uno de los nuestros (EADS / Airbus Group).
+    /// Se lee de los metadatos del fichero; ante cualquier error se considera que NO es propio.</summary>
+    public static bool IsOwnedByKnownAuthor(string assemblyPath)
+    {
+        try
+        {
+            var company = System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath).CompanyName;
+            if (string.IsNullOrWhiteSpace(company)) return false;
+            return OwnAuthorMarkers.Any(m => company.Contains(m, StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return false; }
     }
 
     /// <summary>Devuelve (nombre de proyecto, carpeta del proyecto) para el analisis de codigo fuente.</summary>

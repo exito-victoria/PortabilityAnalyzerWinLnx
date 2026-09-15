@@ -61,7 +61,8 @@ internal static class Program
             else
             {
                 discovered = AssemblyDiscovery.Discover(options.InputPath)
-                    .Select(p => new AssemblyRef(p, options.AssumeThirdParty))
+                    // Aunque se asuma "tercero", si el AUTOR es de los nuestros (EADS / Airbus Group) es PROPIO.
+                    .Select(p => new AssemblyRef(p, options.AssumeThirdParty && !ProjectDiscovery.IsOwnedByKnownAuthor(p)))
                     .ToList();
                 Log.Information("Ensamblados encontrados: {Count}", discovered.Count);
             }
