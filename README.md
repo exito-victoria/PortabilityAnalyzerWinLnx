@@ -87,9 +87,9 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
 
 ```json
 {
-  "obligatorioMultiplataforma": ["ProgrammingManagerService", "ProgrammingManagerServiceLib"],
-  "noModificables":            ["ACRA", "XMA", "Safran"],
-  "divisiblePorUI":            ["ToolsCommon"],
+  "obligatorioMultiplataforma": ["CoreService", "CoreServiceLib"],
+  "noModificables":            ["VendorA", "VendorB", "VendorC"],
+  "divisiblePorUI":            ["SharedTools"],
   "separables":                []
 }
 ```
@@ -152,6 +152,11 @@ Cada proyecto se clasifica y emite así:
 
 Qué hace, ya **implementado** (no son TODOs):
 
+- **Respeta la configuración real del proyecto**: antes de separar, lee los ficheros de configuración y
+  **omite por completo** lo que el proyecto no compila — `<Compile Remove>`, `<EnableDefaultCompileItems>false</...>`
+  (usando entonces los `<Compile Include>`), y las **carpetas/ficheros ignorados** por `.gitignore` (de la solución
+  y de cada proyecto). Así no se arrastran ficheros que no forman parte del build (generados, backups, carpetas
+  excluidas). Lo omitido se registra en un aviso.
 - **Propagación transitiva de "Windows"** por el grafo de tipos de **toda la solución** (herencia **y uso** de
   tipos, **entre proyectos**), sembrando desde los hallazgos y desde los tipos base de WPF/WinForms
   (`Freezable`, `DependencyObject`, `Window`…). Un fichero que —directa o transitivamente— necesita un tipo de
@@ -180,7 +185,7 @@ Qué hace, ya **implementado** (no son TODOs):
   --rules   rules/reglas_portabilidad_windows_linux.json \
   --schema  rules/portability-rules.schema.json \
   --rewrite "C:\salida\SolucionCliente-multiplataforma" \
-  --rewrite-exclude "Proyecto1.Common,Proyecto1.Contracts,Proyecto1.DataModel,Proyecto1.Engine,Proyecto1.Oracle,Proyecto1.WebUI"
+  --rewrite-exclude "App.Common,App.Contracts,App.DataModel,App.Engine,App.Oracle,App.WebUI"
 ```
 
 - Los nombres de `--rewrite-exclude` deben coincidir con un **nombre de proyecto** o de **`.csproj`** de la

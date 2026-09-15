@@ -177,7 +177,8 @@ internal static class Program
                         .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     if (rewriteExcludes.Count > 0)
                         Log.Information("Reescritura: proyectos EXCLUIDOS solicitados: {Excluidos} (deben coincidir con un nombre de proyecto o de .csproj de arriba)", string.Join(", ", rewriteExcludes));
-                    var rewrite = new SolutionRewriter().Rewrite(slnName, proyectos, sourceFindings, Path.GetFullPath(options.RewriteDir), rewriteExcludes);
+                    var slnDir = Path.GetDirectoryName(Path.GetFullPath(options.InputPath));
+                    var rewrite = new SolutionRewriter().Rewrite(slnName, proyectos, sourceFindings, Path.GetFullPath(options.RewriteDir), rewriteExcludes, slnDir);
                     Log.Information("Reescritura multiplataforma: {N} proyecto(s) -> {Portable} portable, {Sep} separable(s), {Win} solo-Windows, {Excl} excluido(s) en {Dir}",
                         rewrite.Projects.Count,
                         rewrite.Projects.Count(p => p.Kind == "Portable"),

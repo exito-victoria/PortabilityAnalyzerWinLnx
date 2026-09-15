@@ -264,7 +264,7 @@ public sealed class WordReportExporter : IReportExporter
     }
 
     /// <summary>Métrica de impacto: clases y ficheros afectados por proyecto.</summary>
-    /// <summary>Terceros no modificables (ACRA/XMA/Safran): restriccion + opciones viables detalladas.</summary>
+    /// <summary>Terceros no modificables (VendorA/VendorB/VendorC): restriccion + opciones viables detalladas.</summary>
     private void AppendNonModifiableSection(Body b, AnalysisReport report)
     {
         var providers = NonModifiableOptions.Analyze(report, _lang);

@@ -172,7 +172,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         }
     }
 
-    /// <summary>Terceros no modificables (ACRA/XMA/Safran): restricción + opciones viables detalladas.</summary>
+    /// <summary>Terceros no modificables (VendorA/VendorB/VendorC): restricción + opciones viables detalladas.</summary>
     private static void AppendNonModifiableSection(StringBuilder sb, AnalysisReport report)
     {
         var providers = NonModifiableOptions.Analyze(report);

@@ -13,7 +13,7 @@ public sealed record NonModifiableProvider(
     IReadOnlyList<ProviderOption> Opciones);
 
 /// <summary>
-/// Para los ensamblados con rol <c>noModificable</c> (ACRA, XMA, Safran...): no se pueden migrar ni
+/// Para los ensamblados con rol <c>noModificable</c> (VendorA, VendorB, VendorC...): no se pueden migrar ni
 /// modificar (es responsabilidad del proveedor y su esfuerzo no se imputa), pero SI se ofrecen vias
 /// viables y detalladas para poder ejecutarlos en el entorno destino. La via recomendada depende de si
 /// el componente arrastra dependencias nativas de Windows (P/Invoke): si las tiene, aislarlo en un host

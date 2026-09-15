@@ -96,10 +96,14 @@ public sealed class SolutionRewriter
     }
 
     public RewriteResult Rewrite(string solutionName, IReadOnlyList<(string Name, string Dir)> projects,
-        IReadOnlyList<SourceFinding> findings, string outputDir, IReadOnlyList<string>? excludeProjects = null)
+        IReadOnlyList<SourceFinding> findings, string outputDir, IReadOnlyList<string>? excludeProjects = null,
+        string? solutionDir = null)
     {
         var warnings = new List<string>();
         var excluded = new HashSet<string>(excludeProjects ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        // .gitignore a nivel de solución (se combina con el de cada proyecto): se leen los ficheros de
+        // configuración PRIMERO para no incluir en la separación ficheros/carpetas excluidos.
+        var slnIgnore = solutionDir is not null ? LoadGitignore(solutionDir) : (new HashSet<string>(StringComparer.OrdinalIgnoreCase), new List<string>());
 
         // 1) Cargar info de cada proyecto y clasificar sus ficheros.
         var infos = new List<ProjInfo>();
@@ -136,13 +140,28 @@ public sealed class SolutionRewriter
             var csprojName = Path.GetFileNameWithoutExtension(csproj);
             info.Excluded = excluded.Contains(name) || excluded.Contains(csprojName);
 
-            // Ficheros del proyecto (código y contenido), excluyendo obj/bin y el .csproj.
-            var allFiles = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+            // Ficheros del proyecto RESPETANDO su configuración real: se excluyen obj/bin, lo ignorado por
+            // .gitignore (solución + proyecto) y lo que el .csproj no compila (<Compile Remove>,
+            // <EnableDefaultCompileItems>false</...> + <Compile Include>). Lo excluido se OMITE por completo.
+            var projIgnore = LoadGitignore(dir);
+            var ignoreFolders = new HashSet<string>(slnIgnore.Item1, StringComparer.OrdinalIgnoreCase);
+            foreach (var fld in projIgnore.Item1) ignoreFolders.Add(fld);
+            var ignoreGlobs = slnIgnore.Item2.Concat(projIgnore.Item2).ToList();
+
+            var enumerated = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
                 .Where(p => !IsObjBin(p, dir) && !p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) && !IsVsJunk(p))
                 .Select(p => (Abs: p, Rel: Path.GetRelativePath(dir, p)))
                 .ToList();
-            info.CodeFiles = allFiles.Where(f => f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+            var ignoredCs = enumerated.Where(f => f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                                              && IsGitIgnored(f.Rel, ignoreFolders, ignoreGlobs)).Select(f => f.Rel).ToList();
+            var allFiles = enumerated.Where(f => !IsGitIgnored(f.Rel, ignoreFolders, ignoreGlobs)).ToList();
+
+            var rawCs = allFiles.Where(f => f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+            info.CodeFiles = FilterByCompileItems(rawCs, text, out var removedCs);
             info.ContentFiles = allFiles.Where(f => !f.Rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+            var omitted = ignoredCs.Concat(removedCs).ToList();
+            if (omitted.Count > 0)
+                warnings.Add($"'{name}': {omitted.Count} fichero(s) .cs excluidos de la separación por configuración del proyecto/.gitignore (no se copian): {string.Join(", ", omitted.Take(8))}{(omitted.Count > 8 ? "…" : string.Empty)}.");
 
             // Ficheros con hallazgo directo del catálogo + punto de entrada (se calcula la clasificación
             // después, tras la propagación de "Windows" por TODA la solución).
@@ -868,6 +887,103 @@ public sealed class SolutionRewriter
         return name.EndsWith(".user", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".dtbcache.json", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(".suo", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Respetar la configuración real del proyecto: .gitignore + items de compilación del .csproj.
+    // ---------------------------------------------------------------------------------------------
+
+    private static readonly Regex CompileRemoveAttr =
+        new("<Compile\\s+[^>]*?Remove\\s*=\\s*\"([^\"]+)\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CompileIncludeAttr =
+        new("<Compile\\s+[^>]*?Include\\s*=\\s*\"([^\"]+)\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>Lee un .gitignore y devuelve nombres de CARPETA a ignorar y globs de FICHERO simples (sin
+    /// ruta). Conservador a propósito: solo patrones sin '/' (los típicos de artefactos), para no arriesgar
+    /// omitir código fuente por reglas ancladas complejas.</summary>
+    private static (HashSet<string> Folders, List<string> FileGlobs) LoadGitignore(string dir)
+    {
+        var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var globs = new List<string>();
+        try
+        {
+            var gi = Path.Combine(dir, ".gitignore");
+            if (!File.Exists(gi)) return (folders, globs);
+            foreach (var raw in File.ReadAllLines(gi))
+            {
+                var line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#") || line.StartsWith("!")) continue;
+                line = line.TrimStart('/').TrimEnd('/');
+                if (line.Length == 0 || line.Contains('/')) continue; // solo patrones simples
+                if (line.Contains('*') || line.Contains('?')) globs.Add(line);
+                else folders.Add(line);
+            }
+        }
+        catch { /* ignorar */ }
+        return (folders, globs);
+    }
+
+    /// <summary>True si el fichero (ruta relativa al proyecto) debe ignorarse: alguna de sus carpetas está
+    /// en la lista de carpetas ignoradas, o su nombre casa un glob de fichero ignorado.</summary>
+    private static bool IsGitIgnored(string rel, HashSet<string> ignoreFolders, List<string> ignoreGlobs)
+    {
+        var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        for (int i = 0; i < parts.Length - 1; i++)
+            if (ignoreFolders.Contains(parts[i])) return true;
+        var name = parts[^1];
+        if (ignoreFolders.Contains(name)) return true;
+        foreach (var g in ignoreGlobs)
+            if (Regex.IsMatch(name, GlobToRegex(g), RegexOptions.IgnoreCase)) return true;
+        return false;
+    }
+
+    /// <summary>Filtra los .cs según los items de compilación del .csproj: honra
+    /// <c>&lt;EnableDefaultCompileItems&gt;false</c>/<c>&lt;EnableDefaultItems&gt;false</c>,
+    /// <c>&lt;Compile Include&gt;</c> y <c>&lt;Compile Remove&gt;</c>. Devuelve los incluidos y, por
+    /// referencia, los que se han excluido (para avisar).</summary>
+    private static List<(string Abs, string Rel)> FilterByCompileItems(List<(string Abs, string Rel)> cs, string csprojText, out List<string> removed)
+    {
+        removed = new List<string>();
+        var enableDefault = !(string.Equals(Prop(csprojText, "EnableDefaultCompileItems"), "false", StringComparison.OrdinalIgnoreCase)
+                           || string.Equals(Prop(csprojText, "EnableDefaultItems"), "false", StringComparison.OrdinalIgnoreCase));
+        var removes = CompileRemoveAttr.Matches(csprojText).Select(m => m.Groups[1].Value).ToList();
+        var includes = CompileIncludeAttr.Matches(csprojText).Select(m => m.Groups[1].Value).ToList();
+
+        var kept = new List<(string Abs, string Rel)>();
+        foreach (var f in cs)
+        {
+            bool included = enableDefault || includes.Any(p => GlobMatch(f.Rel, p));
+            bool removedByRule = removes.Any(p => GlobMatch(f.Rel, p));
+            if (included && !removedByRule) kept.Add(f);
+            else removed.Add(f.Rel);
+        }
+        return kept;
+    }
+
+    /// <summary>Casa una ruta relativa contra un glob de MSBuild (<c>**</c>, <c>*</c>, <c>?</c>), normalizando
+    /// separadores. Comparación sin distinguir mayúsculas.</summary>
+    private static bool GlobMatch(string rel, string pattern)
+    {
+        var r = rel.Replace('\\', '/');
+        var p = pattern.Replace('\\', '/').TrimStart('/');
+        return Regex.IsMatch(r, "^" + GlobToRegex(p) + "$", RegexOptions.IgnoreCase);
+    }
+
+    private static string GlobToRegex(string glob)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < glob.Length; i++)
+        {
+            char c = glob[i];
+            if (c == '*')
+            {
+                if (i + 1 < glob.Length && glob[i + 1] == '*') { sb.Append(".*"); i++; if (i + 1 < glob.Length && glob[i + 1] == '/') i++; }
+                else sb.Append("[^/]*");
+            }
+            else if (c == '?') sb.Append("[^/]");
+            else sb.Append(Regex.Escape(c.ToString()));
+        }
+        return sb.ToString();
     }
 
     private bool IsEntryPoint(string absPath)

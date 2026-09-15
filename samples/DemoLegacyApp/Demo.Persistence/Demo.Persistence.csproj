@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Carpeta excluida de la compilación: el reescritor debe OMITIRLA por completo. -->
+    <Compile Remove="Excluded\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="System.Diagnostics.EventLog" Version="8.0.0" />
   </ItemGroup>
 
