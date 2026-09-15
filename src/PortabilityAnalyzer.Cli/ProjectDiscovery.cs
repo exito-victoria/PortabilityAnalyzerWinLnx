@@ -57,10 +57,15 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
 
         var firstPartyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var projectDirs = new List<string>();
+        // Mapa nombre-de-ensamblado -> .csproj, para poder inferir el AUTOR desde el proyecto cuando el
+        // DLL no aporta el dato (no compilado, o sin metadato CompanyName).
+        var csprojByAsmName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var csproj in csprojPaths)
         {
             projectDirs.Add(System.IO.Path.GetDirectoryName(csproj)!);
-            firstPartyNames.Add(ResolveAssemblyName(csproj));
+            var asmName = ResolveAssemblyName(csproj);
+            firstPartyNames.Add(asmName);
+            csprojByAsmName[asmName] = csproj;
         }
 
         // Se escanean SOLO las carpetas bin de los proyectos implicados (no todo el arbol) y se
@@ -79,26 +84,56 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
                 // (b) su AUTOR sea uno de los nuestros (EADS / Airbus Group): en ese caso es PROPIO y
                 // modificable, aunque no sea un proyecto de la solucion analizada.
                 IsThirdParty: !firstPartyNames.Contains(System.IO.Path.GetFileNameWithoutExtension(p))
-                              && !IsOwnedByKnownAuthor(p)))
+                              && !OwnedByAuthor(p, csprojByAsmName)))
             .ToList();
     }
 
     /// <summary>Autores cuyos ensamblados se consideran PROPIOS (modificables), aunque no sean un proyecto
-    /// de la solucion: se comparan (sin distinguir mayusculas, por subcadena) contra el CompanyName del DLL.</summary>
+    /// de la solucion. Se comparan (sin distinguir mayusculas, por subcadena) contra el autor del ensamblado.</summary>
     private static readonly string[] OwnAuthorMarkers = { "EADS", "Airbus" };
 
-    /// <summary>True si el autor (CompanyName) del ensamblado es uno de los nuestros (EADS / Airbus Group).
-    /// Se lee de los metadatos del fichero; ante cualquier error se considera que NO es propio.</summary>
-    public static bool IsOwnedByKnownAuthor(string assemblyPath)
+    private static readonly Regex CompanyElement = new("<Company>\\s*([^<]+?)\\s*</Company>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex AuthorsElement = new("<Authors>\\s*([^<]+?)\\s*</Authors>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ProductElement = new("<Product>\\s*([^<]+?)\\s*</Product>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static bool CompanyIsOwned(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && OwnAuthorMarkers.Any(m => value.Contains(m, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Autor (CompanyName) de un DLL, o null si no se puede leer / no lo declara.</summary>
+    private static string? ReadDllCompany(string assemblyPath)
+    {
+        try { return System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath).CompanyName; }
+        catch { return null; }
+    }
+
+    /// <summary>True si el .csproj declara un autor de los nuestros en <c>&lt;Company&gt;</c>,
+    /// <c>&lt;Authors&gt;</c> o <c>&lt;Product&gt;</c>. Se usa cuando el DLL no aporta el autor.</summary>
+    public static bool CsprojAuthorIsOwned(string csprojPath)
     {
         try
         {
-            var company = System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath).CompanyName;
-            if (string.IsNullOrWhiteSpace(company)) return false;
-            return OwnAuthorMarkers.Any(m => company.Contains(m, StringComparison.OrdinalIgnoreCase));
+            var t = File.ReadAllText(csprojPath);
+            return CompanyIsOwned(CompanyElement.Match(t) is { Success: true } c ? c.Groups[1].Value : null)
+                || CompanyIsOwned(AuthorsElement.Match(t) is { Success: true } a ? a.Groups[1].Value : null)
+                || CompanyIsOwned(ProductElement.Match(t) is { Success: true } pr ? pr.Groups[1].Value : null);
         }
         catch { return false; }
     }
+
+    /// <summary>True si el ensamblado es PROPIO (EADS / Airbus Group). Primero mira el autor del DLL; si el
+    /// DLL no aporta autor (no compilado o sin metadato), lo INFIERE del .csproj del proyecto homonimo.</summary>
+    private static bool OwnedByAuthor(string dllPath, IReadOnlyDictionary<string, string> csprojByAsmName)
+    {
+        var company = ReadDllCompany(dllPath);
+        if (CompanyIsOwned(company)) return true;
+        if (string.IsNullOrWhiteSpace(company)
+            && csprojByAsmName.TryGetValue(System.IO.Path.GetFileNameWithoutExtension(dllPath), out var csproj))
+            return CsprojAuthorIsOwned(csproj);
+        return false;
+    }
+
+    /// <summary>Autor propio (EADS / Airbus Group) de un DLL suelto (modo directorio/DLL, sin .csproj).</summary>
+    public static bool IsOwnedByKnownAuthor(string assemblyPath) => CompanyIsOwned(ReadDllCompany(assemblyPath));
 
     /// <summary>Devuelve (nombre de proyecto, carpeta del proyecto) para el analisis de codigo fuente.</summary>
     public IReadOnlyList<(string Name, string Dir)> GetProjects(string inputPath)
