@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using PortabilityAnalyzer.Core;
 
 namespace PortabilityAnalyzer.Cli;
@@ -95,45 +95,52 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
     private static readonly Regex CompanyElement = new("<Company>\\s*([^<]+?)\\s*</Company>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex AuthorsElement = new("<Authors>\\s*([^<]+?)\\s*</Authors>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex ProductElement = new("<Product>\\s*([^<]+?)\\s*</Product>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CopyrightElement = new("<Copyright>\\s*([^<]+?)\\s*</Copyright>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    private static bool CompanyIsOwned(string? value) =>
+    private static bool TextIsOwned(string? value) =>
         !string.IsNullOrWhiteSpace(value) && OwnAuthorMarkers.Any(m => value.Contains(m, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Autor (CompanyName) de un DLL, o null si no se puede leer / no lo declara.</summary>
-    private static string? ReadDllCompany(string assemblyPath)
+    /// <summary>Metadatos de autor de un DLL combinados: empresa, copyright y producto. El autor propio
+    /// suele venir en <c>CompanyName</c>, pero en ensamblados antiguos aparece SOLO en el copyright
+    /// (p. ej. "Copyright © EADS 2017"); por eso se miran los tres. "" si no se puede leer.</summary>
+    private static string ReadDllAuthorText(string assemblyPath)
     {
-        try { return System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath).CompanyName; }
-        catch { return null; }
+        try
+        {
+            var fi = System.Diagnostics.FileVersionInfo.GetVersionInfo(assemblyPath);
+            return string.Join(" | ", new[] { fi.CompanyName, fi.LegalCopyright, fi.ProductName, fi.LegalTrademarks }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+        }
+        catch { return string.Empty; }
     }
 
     /// <summary>True si el .csproj declara un autor de los nuestros en <c>&lt;Company&gt;</c>,
-    /// <c>&lt;Authors&gt;</c> o <c>&lt;Product&gt;</c>. Se usa cuando el DLL no aporta el autor.</summary>
+    /// <c>&lt;Authors&gt;</c>, <c>&lt;Product&gt;</c> o <c>&lt;Copyright&gt;</c>.</summary>
     public static bool CsprojAuthorIsOwned(string csprojPath)
     {
         try
         {
             var t = File.ReadAllText(csprojPath);
-            return CompanyIsOwned(CompanyElement.Match(t) is { Success: true } c ? c.Groups[1].Value : null)
-                || CompanyIsOwned(AuthorsElement.Match(t) is { Success: true } a ? a.Groups[1].Value : null)
-                || CompanyIsOwned(ProductElement.Match(t) is { Success: true } pr ? pr.Groups[1].Value : null);
+            foreach (var rx in new[] { CompanyElement, AuthorsElement, ProductElement, CopyrightElement })
+                if (rx.Match(t) is { Success: true } m && TextIsOwned(m.Groups[1].Value)) return true;
+            return false;
         }
         catch { return false; }
     }
 
-    /// <summary>True si el ensamblado es PROPIO (EADS / Airbus Group). Primero mira el autor del DLL; si el
-    /// DLL no aporta autor (no compilado o sin metadato), lo INFIERE del .csproj del proyecto homonimo.</summary>
+    /// <summary>True si el ensamblado es PROPIO (EADS / Airbus Group). Mira el autor del DLL (empresa +
+    /// copyright + producto) y, si el DLL no lo confirma, lo INFIERE del .csproj del proyecto homonimo
+    /// (no compilado, o metadatos ausentes).</summary>
     private static bool OwnedByAuthor(string dllPath, IReadOnlyDictionary<string, string> csprojByAsmName)
     {
-        var company = ReadDllCompany(dllPath);
-        if (CompanyIsOwned(company)) return true;
-        if (string.IsNullOrWhiteSpace(company)
-            && csprojByAsmName.TryGetValue(System.IO.Path.GetFileNameWithoutExtension(dllPath), out var csproj))
+        if (TextIsOwned(ReadDllAuthorText(dllPath))) return true;
+        if (csprojByAsmName.TryGetValue(System.IO.Path.GetFileNameWithoutExtension(dllPath), out var csproj))
             return CsprojAuthorIsOwned(csproj);
         return false;
     }
 
     /// <summary>Autor propio (EADS / Airbus Group) de un DLL suelto (modo directorio/DLL, sin .csproj).</summary>
-    public static bool IsOwnedByKnownAuthor(string assemblyPath) => CompanyIsOwned(ReadDllCompany(assemblyPath));
+    public static bool IsOwnedByKnownAuthor(string assemblyPath) => TextIsOwned(ReadDllAuthorText(assemblyPath));
 
     /// <summary>Devuelve (nombre de proyecto, carpeta del proyecto) para el analisis de codigo fuente.</summary>
     public IReadOnlyList<(string Name, string Dir)> GetProjects(string inputPath)

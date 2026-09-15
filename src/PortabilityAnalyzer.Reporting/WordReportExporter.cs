@@ -81,6 +81,9 @@ public sealed class WordReportExporter : IReportExporter
         double[] confirmedWeights = { 1.7, 1.0, 0.5, 0.8, 2.2, 1.5, 2.1, 2.8, 3.4 };
         double[] manualWeights = { 2.0, 1.2, 1.2, 0.5, 3.0, 3.0 };
 
+        // Proyectos con CÓDIGO FUENTE en la solución analizada (para distinguir lo propio con/sin fuente).
+        var sourceProjects = report.ProjectNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
         {
             b.Append(Para($"{asm.Classification.Name} ({asm.Classification.Kind})", bold: true, sizeHalfPt: 28));
@@ -95,7 +98,13 @@ public sealed class WordReportExporter : IReportExporter
                 continue;
             }
 
-            var terceros = asm.IsThirdParty ? T(" | Terceros (factor de incertidumbre aplicado)", " | Third-party (uncertainty factor applied)") : string.Empty;
+            var ownedNoSource = !asm.IsThirdParty && sourceProjects.Count > 0 && !sourceProjects.Contains(asm.Classification.Name);
+            var terceros = asm.IsThirdParty
+                ? T(" | Terceros (factor de incertidumbre aplicado)", " | Third-party (uncertainty factor applied)")
+                : ownedNoSource
+                    ? T(" | Propio (EADS/Airbus): código fuente NO disponible en la solución analizada (estimación a partir del IL)",
+                        " | Own (EADS/Airbus): source code NOT available in the analyzed solution (estimate from IL)")
+                    : string.Empty;
             b.Append(Para(T($"Severidad máxima: {Loc.Severity(asm.MaxSeverity, _lang)} | Esfuerzo medio: {N(asm.Effort.Media)} h{terceros}",
                             $"Max severity: {Loc.Severity(asm.MaxSeverity, _lang)} | Mean effort: {N(asm.Effort.Media)} h{terceros}")));
 

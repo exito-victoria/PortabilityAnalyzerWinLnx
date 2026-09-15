@@ -31,6 +31,8 @@ public sealed class MarkdownReportExporter : IReportExporter
         AppendSourceSection(sb, report);
         AppendCodeExamplesSection(sb, report);
 
+        var sourceProjects = report.ProjectNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (var asm in report.Assemblies.OrderByDescending(a => a.MaxSeverity))
         {
             sb.AppendLine($"## {asm.Classification.Name} ({asm.Classification.Kind})");
@@ -45,7 +47,10 @@ public sealed class MarkdownReportExporter : IReportExporter
                 continue;
             }
 
-            var terceros = asm.IsThirdParty ? " | Terceros (factor de incertidumbre aplicado)" : string.Empty;
+            var ownedNoSource = !asm.IsThirdParty && sourceProjects.Count > 0 && !sourceProjects.Contains(asm.Classification.Name);
+            var terceros = asm.IsThirdParty ? " | Terceros (factor de incertidumbre aplicado)"
+                : ownedNoSource ? " | Propio (EADS/Airbus): código fuente NO disponible en la solución analizada (estimación a partir del IL)"
+                : string.Empty;
             sb.AppendLine($"Severidad máxima: {asm.MaxSeverity} | Esfuerzo medio: {asm.Effort.Media:0.#} h{terceros}");
             sb.AppendLine();
 
