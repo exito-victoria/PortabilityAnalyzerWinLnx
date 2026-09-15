@@ -103,7 +103,7 @@ public sealed class ProjectSplitter
         RecreateDir(winDir);
 
         // El proyecto Multi tiene su PROPIO namespace raiz (<root> -> <root>Multi), como pidio el cliente
-        // (p. ej. ToolsCommon -> ToolsCommonMulti). El proyecto Windows conserva el namespace original.
+        // (p. ej. SharedTools -> SharedToolsMulti). El proyecto Windows conserva el namespace original.
         var rootNs = DetectRootNamespace(codeFiles);
         var multiRootNs = rootNs is null ? null : rootNs + "Multi";
         Func<string, string>? multiTransform =

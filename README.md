@@ -84,9 +84,9 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
 
 ```json
 {
-  "obligatorioMultiplataforma": ["ProgrammingManagerService", "ProgrammingManagerServiceLib"],
-  "noModificables":            ["ACRA", "XMA", "Safran"],
-  "divisiblePorUI":            ["ToolsCommon"],
+  "obligatorioMultiplataforma": ["CoreService", "CoreServiceLib"],
+  "noModificables":            ["VendorA", "VendorB", "VendorC"],
+  "divisiblePorUI":            ["SharedTools"],
   "separables":                []
 }
 ```
