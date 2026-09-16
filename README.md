@@ -71,6 +71,7 @@ PortabilityAnalyzer.Cli \
 | `--output` | Ruta del informe. La carpeta se **crea si no existe**. |
 | `--format` | `json` (por defecto), `markdown`, `word`, `all`, o lista por comas (`word,markdown`). Con varios, la extensión de cada fichero se deriva de `--output`. |
 | `--executive` | Genera además el **informe ejecutivo** `InformeEjec_<proyecto>.docx` en la misma carpeta. |
+| `--discover-rules` | **Descubre reglas nuevas** analizando el código (semántica `SupportedOSPlatform`), las **añade al catálogo** (marcadas para revisar) y **NO** ejecuta el análisis. Ver ["Descubrimiento de reglas"](#descubrimiento-de-reglas---discover-rules). |
 | `--assume-third-party` | Aplica el factor de incertidumbre a todos los ensamblados (para directorio/DLL sueltos). |
 | `--third-party-factor <n>` | Fija el factor (>0; implica `--assume-third-party`; 1.5 por defecto). |
 | `--testing-factor <n>` | Fracción del esfuerzo imputada a Pruebas y CI (0.25 por defecto). |
@@ -131,6 +132,32 @@ en una subcarpeta dedicada **`proyectos-separados/`** (nunca colisiona con el c�
   (código antes/después) y la **separación por interfaces** explicada con las firmas reales.
 
 Los proyectos generados **compilan** (validado); quedan listos a falta de conectar los seams y probar.
+
+## Descubrimiento de reglas (`--discover-rules`)
+
+Antes de portar una solución (p. ej. una WPF migrada de .NET Framework 4.7 a .NET 8), se pueden **extraer
+reglas de portabilidad nuevas** del propio código y **enriquecer el catálogo**. Es un **modo aparte** que se
+activa por parámetro; en una ejecución posterior, **sin** el parámetro, se corre el análisis ya con el
+catálogo enriquecido.
+
+```bash
+# 1) Descubrir reglas nuevas y añadirlas al catálogo (no analiza)
+dotnet run --project src/PortabilityAnalyzer.Cli -- \
+  --path "C:\ruta\Solucion.sln" \
+  --rules rules/reglas_portabilidad_windows_linux.json \
+  --schema rules/portability-rules.schema.json \
+  --discover-rules
+# 2) Revisar las reglas nuevas (id "DISC-…", nota "REVISAR") y ejecutar el análisis SIN el flag.
+```
+
+- **Detección semántica**: compila con Roslyn + los **ensamblados de referencia de .NET 8** (packs
+  `Microsoft.NETCore.App.Ref` y `Microsoft.WindowsDesktop.App.Ref`) y localiza APIs anotadas
+  **`[SupportedOSPlatform("windows")]`** / **`[UnsupportedOSPlatform("linux")]`** (señal del analizador CA1416).
+  Requiere el SDK de .NET 8 (o `DOTNET_ROOT`); si no encuentra los packs, avisa.
+- **Solo lo NUEVO**: descarta las APIs ya cubiertas por el catálogo (por tipo, nombre o namespace).
+- **Reglas completas para revisar**: cada API nueva se añade con id `DISC-…`, patrón, categoría, severidad,
+  esfuerzo y una **propuesta** de alternativa/pasos (ES + inglés), `confianza: "Baja"` y nota **"REVISAR"**.
+- **Seguro**: se **revalida el catálogo contra el esquema** tras la fusión; si no valida, se restaura el original.
 
 ## Cómo funciona
 
