@@ -30,6 +30,24 @@ internal static class Program
             var catalog = loader.Load(options.RulesPath);
             Log.Information("Catalogo cargado: {Count} reglas", catalog.Reglas.Count);
 
+            // MODO DESCUBRIMIENTO DE REGLAS (--discover-rules): analiza el codigo (semantica SupportedOSPlatform),
+            // anade al catalogo las reglas nuevas (marcadas para revisar) y NO ejecuta analisis ni reescritura.
+            if (options.DiscoverRules)
+            {
+                if (!(ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)))
+                {
+                    Log.Error("--discover-rules requiere una solucion (.sln) o proyecto (.csproj) en --path.");
+                    return 1;
+                }
+                var proyectosDisc = new ProjectDiscovery().GetProjects(options.InputPath);
+                var disc = new RuleDiscovery().Discover(proyectosDisc, Log.Logger);
+                var added = DiscoveredRuleMerger.Merge(options.RulesPath, options.SchemaPath, disc.Candidates, Log.Logger);
+                if (added < 0) return 2;
+                Log.Information("Descubrimiento COMPLETADO: {Added} regla(s) nueva(s) anadida(s) a {Rules}. Revisa las marcadas 'REVISAR' y vuelve a ejecutar SIN --discover-rules para el analisis/reescritura.",
+                    added, options.RulesPath);
+                return 0;
+            }
+
             // 2) Registrar detectores (uno por tipo de patron; ver IAssemblyDetector.Handles).
             IReadOnlyList<IAssemblyDetector> detectors = new IAssemblyDetector[]
             {

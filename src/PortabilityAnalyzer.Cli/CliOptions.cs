@@ -44,11 +44,18 @@ internal sealed class CliOptions
     /// interesa separar todavía (flag <c>--rewrite-exclude p1,p2,p3</c>).</summary>
     public IReadOnlyList<string> RewriteExclude { get; init; } = Array.Empty<string>();
 
+    /// <summary>Si es true (flag <c>--discover-rules</c>), se ejecuta el DESCUBRIMIENTO de reglas: analiza el
+    /// código (semántica SupportedOSPlatform), añade al catálogo las reglas nuevas (marcadas para revisar) y
+    /// NO ejecuta el análisis de portabilidad ni la reescritura. En una ejecución posterior, sin este flag,
+    /// se corre el proceso completo con el catálogo ya enriquecido.</summary>
+    public bool DiscoverRules { get; init; }
+
     public static CliOptions? Parse(string[] args)
     {
         string? input = null, rules = null, schema = null, output = null, format = null, rolesPath = null, rewriteDir = null, rewriteExclude = null;
         bool assumeThirdParty = false;
         bool executive = false;
+        bool discoverRules = false;
         double thirdPartyFactor = 1.5;
         double testingFactor = 0.25;
 
@@ -74,6 +81,7 @@ internal sealed class CliOptions
 
                 case "--rewrite": rewriteDir = Next(args, ref i); break;
                 case "--rewrite-exclude": rewriteExclude = Next(args, ref i); break;
+                case "--discover-rules": discoverRules = true; break;
 
                 case "--third-party-factor":
                     var raw = Next(args, ref i);
@@ -112,7 +120,8 @@ internal sealed class CliOptions
             Executive = executive,
             RewriteDir = rewriteDir,
             RewriteExclude = (rewriteExclude ?? string.Empty)
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            DiscoverRules = discoverRules
         };
     }
 
@@ -158,6 +167,7 @@ internal sealed class CliOptions
             "  --executive               Genera ademas el informe ejecutivo InformeEjec_<proyecto>.docx (resumen para el cliente)." + Environment.NewLine +
             "  --rewrite <dir>           Reescribe la solucion completa a multiplataforma en <dir> (proyectos net8.0 + net8.0-windows)." + Environment.NewLine +
             "  --rewrite-exclude <lista> Proyectos a NO separar (se copian enteros), separados por comas (p. ej. proyecto01,proyecto02)." + Environment.NewLine +
+            "  --discover-rules          Descubre reglas nuevas (semantica SupportedOSPlatform), las anade al catalogo y NO analiza/reescribe." + Environment.NewLine +
             "  --assume-third-party      Aplica un factor de incertidumbre (x1.5 por defecto) a todos los ensamblados." + Environment.NewLine +
             "  --third-party-factor <n>  Fija el factor (>0) e implica --assume-third-party." + Environment.NewLine +
             "  --testing-factor <n>      Fraccion del esfuerzo de desarrollo imputada a Pruebas y CI (por defecto 0.25).");

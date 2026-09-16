@@ -74,6 +74,7 @@ PortabilityAnalyzer.Cli \
 | `--executive` | Genera además el **informe ejecutivo** `InformeEjec_<proyecto>.docx` en la misma carpeta. |
 | `--rewrite <dir>` | **Reescribe la solución completa** a multiplataforma en `<dir>` (proyectos `net8.0` + `net8.0-windows`). Debe estar **fuera** de la solución original. Ver ["Reescritura completa"](#reescritura-completa-de-la-solución---rewrite). |
 | `--rewrite-exclude <lista>` | Proyectos que **NO** se separan (se copian enteros), separados por comas. Casa por **nombre de proyecto o de `.csproj`** (ignora mayúsculas). También se toman los `noModificables` del `--roles`. |
+| `--discover-rules` | **Descubre reglas nuevas** analizando el código (semántica `SupportedOSPlatform`), las **añade al catálogo** (marcadas para revisar) y **NO** ejecuta análisis ni reescritura. Ver ["Descubrimiento de reglas"](#descubrimiento-de-reglas---discover-rules). |
 | `--assume-third-party` | Aplica el factor de incertidumbre a todos los ensamblados (para directorio/DLL sueltos). |
 | `--third-party-factor <n>` | Fija el factor (>0; implica `--assume-third-party`; 1.5 por defecto). |
 | `--testing-factor <n>` | Fracción del esfuerzo imputada a Pruebas y CI (0.25 por defecto). |
@@ -193,6 +194,40 @@ Qué hace, ya **implementado** (no son TODOs):
   nombre de la lista que **no** coincida (mostrando los disponibles) — úsalo para copiar los nombres exactos.
 - Apunta siempre al **`.sln`** (no a un `.csproj` suelto) para que las referencias entre proyectos se recableen.
 - `--rewrite` debe estar **fuera** de la carpeta de la solución original.
+
+## Descubrimiento de reglas (`--discover-rules`)
+
+Antes de portar una solución (p. ej. una WPF migrada de .NET Framework 4.7 a .NET 8), se pueden **extraer
+reglas de portabilidad nuevas** del propio código y **enriquecer el catálogo**. Es un **modo aparte** que se
+activa por parámetro; en una ejecución posterior, **sin** el parámetro, se corre el análisis + reescritura ya
+con el catálogo enriquecido.
+
+```bash
+# 1) Descubrir reglas nuevas y añadirlas al catálogo (no analiza ni reescribe)
+dotnet run --project src/PortabilityAnalyzer.Cli -- \
+  --path "C:\ruta\Solucion.sln" \
+  --rules rules/reglas_portabilidad_windows_linux.json \
+  --schema rules/portability-rules.schema.json \
+  --discover-rules
+
+# 2) Revisar en el catálogo las reglas nuevas (id "DISC-…", nota "REVISAR") y luego, SIN el flag,
+#    ejecutar el análisis/reescritura completos.
+```
+
+Cómo funciona:
+
+- **Detección semántica**: compila el código con Roslyn + los **ensamblados de referencia de .NET 8** (packs
+  `Microsoft.NETCore.App.Ref` y `Microsoft.WindowsDesktop.App.Ref`) y localiza los usos de APIs anotadas
+  **`[SupportedOSPlatform("windows")]`** / **`[UnsupportedOSPlatform("linux")]`** (la misma señal del analizador
+  oficial **CA1416**). Requiere el SDK de .NET 8 instalado (o `DOTNET_ROOT`); si no encuentra los packs, avisa
+  y el descubrimiento es limitado.
+- **Solo lo NUEVO**: descarta las APIs ya cubiertas por el catálogo (por tipo, nombre o namespace).
+- **Reglas completas para revisar**: cada API nueva se añade como una regla bien formada (id `DISC-…`, patrón,
+  categoría, severidad, esfuerzo) con una **propuesta** de alternativa/pasos (ES + inglés), `confianza: "Baja"`
+  y nota **"REVISAR"**. Ajusta a mano lo que haga falta antes de darla por buena.
+- **Seguro**: se **revalida el catálogo contra el esquema** tras la fusión; si no valida, se **restaura** el original.
+
+> Las reglas descubiertas alimentan el análisis a nivel de **IL/ensamblado** (detectores Mono.Cecil).
 
 ## Cómo funciona
 
