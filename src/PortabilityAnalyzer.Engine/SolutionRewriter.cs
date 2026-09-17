@@ -80,7 +80,9 @@ public sealed class SolutionRewriter
         public List<(string AbsCsproj, bool Portable)> ExternalRefs = new(); // referencias a proyectos externos
         public List<(string Abs, string Rel)> CodeFiles = new();     // todos los .cs (sin clasificar)
         public List<(string Abs, string Rel)> ContentFiles = new();  // no-.cs (xaml/resx/...)
-        public HashSet<string> FindingFiles = new(StringComparer.OrdinalIgnoreCase); // .cs con hallazgo directo
+        public HashSet<string> FindingFiles = new(StringComparer.OrdinalIgnoreCase); // .cs with any Windows finding
+        public HashSet<string> GuiFindingFiles = new(StringComparer.OrdinalIgnoreCase); // .cs with a GUI (UI) finding
+        public List<SourceFinding> Findings = new();     // this project's source findings (for marking/packages)
         public List<(string Abs, string Rel)> WinCode = new();
         public List<(string Abs, string Rel)> PortableCode = new();
         public List<(string Abs, string Rel)> WinContent = new();
@@ -163,10 +165,11 @@ public sealed class SolutionRewriter
             if (omitted.Count > 0)
                 warnings.Add($"'{name}': {omitted.Count} fichero(s) .cs excluidos de la separación por configuración del proyecto/.gitignore (no se copian): {string.Join(", ", omitted.Take(8))}{(omitted.Count > 8 ? "…" : string.Empty)}.");
 
-            // Ficheros con hallazgo directo del catálogo + punto de entrada (se calcula la clasificación
-            // después, tras la propagación de "Windows" por TODA la solución).
-            info.FindingFiles = findings.Where(f => string.Equals(f.Project, name, StringComparison.OrdinalIgnoreCase))
-                .Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Source findings for this project. Only the GUI (UI) findings drive the Windows side now:
+            // the rest of the Windows APIs stay portable (library swap + compile-enabling package + [PORTAR] mark).
+            info.Findings = findings.Where(f => string.Equals(f.Project, name, StringComparison.OrdinalIgnoreCase)).ToList();
+            info.FindingFiles = info.Findings.Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            info.GuiFindingFiles = info.Findings.Where(f => IsGuiCategory(f.Categoria)).Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var f in info.CodeFiles)
                 if (IsEntryPoint(f.Abs)) { info.HasEntryPoint = true; break; }
 
@@ -309,14 +312,17 @@ public sealed class SolutionRewriter
                 {
                     var outName = info.PortableName!;
                     var projDir = Path.Combine(outputDir, outName);
-                    CopyCode(info.PortableCode.Concat(info.WinCode), info.Dir, projDir, outName);
+                    var portFiles = info.PortableCode.Concat(info.WinCode).ToList();
+                    // Library-first: swap safe namespaces and mark the Windows-only APIs that remain.
+                    var nsSwaps = NamespaceSwapsFor(info);
+                    CopyCode(portFiles, info.Dir, projDir, outName, BuildPortableOverrides(info, portFiles, nsSwaps, null));
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
                     var refs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null && WinSideRef(rn) is not null)
                             warnings.Add($"'{outName}' (portable) referenciaba a '{rn}', que quedó solo-Windows: revisar (introducir un seam) o mantener este proyecto en net8.0-windows.");
                     var portableRelPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
-                    WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0", info.PackageLines, info.UseWpf, info.UseWinForms,
+                    WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0", PortablePackageLines(info, portFiles), info.UseWpf, info.UseWinForms,
                         (IsExeType(info.OutputType) || info.HasEntryPoint) ? info.OutputType : null, refs, portableRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((outName, $"{outName}\\{outName}.csproj"));
                     var alreadyNet8 = info.Tfm is not null && !info.Tfm.Contains("-windows", StringComparison.OrdinalIgnoreCase);
@@ -356,8 +362,11 @@ public sealed class SolutionRewriter
                     warnings.AddRange(seam.Warnings);
                     foreach (var s in seam.Seams) allSeams.Add((info.Name, s.Concrete, s.Interface, s.Namespace));
 
-                    // NÚCLEO (net8.0): ficheros portables (con las reescrituras de inyección) + interfaces de seam.
-                    CopyCode(seam.Portable, info.Dir, coreDir, coreName, seam.CoreOverrides);
+                    // CORE (net8.0): portable files (with seam injection rewrites) + seam interfaces.
+                    // Library-first: swap safe namespaces and mark the Windows-only APIs that remain portable.
+                    var coreNsSwaps = NamespaceSwapsFor(info);
+                    var coreOverrides = BuildPortableOverrides(info, seam.Portable, coreNsSwaps, seam.CoreOverrides);
+                    CopyCode(seam.Portable, info.Dir, coreDir, coreName, coreOverrides);
                     CopyContent(info.PortableContent, coreDir);
                     WriteGenerated(seam.CoreExtraFiles, coreDir);
                     var coreRefs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
@@ -365,8 +374,8 @@ public sealed class SolutionRewriter
                         if (CoreSideRef(rn) is null)
                             warnings.Add($"El núcleo '{coreName}' referenciaba a '{rn}', que quedó solo-Windows: introducir un seam (interfaz) en el núcleo o mover el uso a '{winName}'.");
                     var coreRelPaths = ProjRelPaths(coreRefs).Concat(ExternalRelPaths(info.ExternalRefs, coreDir, onlyPortable: true)).ToList();
-                    WriteCsproj(Path.Combine(coreDir, coreName + ".csproj"), "net8.0", info.PackageLines, false, false,
-                        null, coreRefs, coreRelPaths, windowsOnlyFilter: true, source: info);
+                    WriteCsproj(Path.Combine(coreDir, coreName + ".csproj"), "net8.0", PortablePackageLines(info, seam.Portable), false, false,
+                        null, coreRefs, coreRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((coreName, $"{coreName}\\{coreName}.csproj"));
 
                     // WINDOWS (net8.0-windows): ficheros Windows (algunos implementan ya la interfaz de seam)
@@ -582,6 +591,113 @@ public sealed class SolutionRewriter
     /// <summary>True si el OutputType corresponde a un ejecutable (Exe/WinExe).</summary>
     private static bool IsExeType(string? outputType) =>
         outputType is not null && outputType.Contains("Exe", StringComparison.OrdinalIgnoreCase);
+
+    // ---------------------------------------------------------------------------------------------
+    // Library-first portability: swap Windows-only packages for their cross-platform equivalent, add the
+    // packages that let the retargeted (net8.0) code compile, swap safe namespaces and mark the rest.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>net8.0 package that lets Windows-only BCL code of a given category still COMPILE (it runs on
+    /// Windows and throws PlatformNotSupportedException on Linux until rewritten). Null if none is needed.</summary>
+    private static (string Pkg, string Ver)? CompileEnablingPackage(string categoria) => categoria switch
+    {
+        "Registry" => ("Microsoft.Win32.Registry", "5.0.0"),
+        "EventLog" => ("System.Diagnostics.EventLog", "8.0.0"),
+        "WMI" => ("System.Management", "8.0.0"),
+        "Identity" => ("System.Security.Principal.Windows", "5.0.0"),
+        "PerformanceCounter" => ("System.Diagnostics.PerformanceCounter", "8.0.0"),
+        "ServiceProcess" => ("System.ServiceProcess.ServiceController", "8.0.0"),
+        _ => null
+    };
+
+    private static string IncludeNameOf(string packageLine)
+    {
+        var m = IncludeAttr.Match(packageLine);
+        return m.Success ? m.Groups[1].Value.Trim() : string.Empty;
+    }
+
+    /// <summary>Builds the PackageReference lines of a PORTABLE project: swaps Windows-only packages for their
+    /// cross-platform replacement (per the curated catalog), keeps the rest, and ADDS the compile-enabling
+    /// packages for the non-GUI Windows categories used by the portable files.</summary>
+    private List<string> PortablePackageLines(ProjInfo info, IEnumerable<(string Abs, string Rel)> portableFiles)
+    {
+        var lines = new List<string>();
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in info.PackageLines)
+        {
+            var inc = IncludeNameOf(line);
+            var e = inc.Length > 0 ? LibraryReplacements.Lookup(inc) : null;
+            if (e is { Status: LibraryStatus.Reemplazar, Replacement: { } repl })
+            {
+                var ver = e.ReplacementVersion is null ? string.Empty : $" Version=\"{e.ReplacementVersion}\"";
+                lines.Add($"<PackageReference Include=\"{repl}\"{ver} />");
+                present.Add(repl);
+            }
+            else { lines.Add(line); if (inc.Length > 0) present.Add(inc); }
+        }
+
+        // Add compile-enabling packages for the non-GUI Windows categories present in the portable files.
+        var portableRel = portableFiles.Select(f => f.Rel).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var categories = info.Findings
+            .Where(f => portableRel.Contains(f.File) && !IsGuiCategory(f.Categoria))
+            .Select(f => f.Categoria).Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var cat in categories)
+        {
+            var pkg = CompileEnablingPackage(cat);
+            if (pkg is { } p && !present.Contains(p.Pkg))
+            {
+                lines.Add($"<PackageReference Include=\"{p.Pkg}\" Version=\"{p.Ver}\" />");
+                present.Add(p.Pkg);
+            }
+        }
+        return lines;
+    }
+
+    /// <summary>Namespace swaps (old -> new) for the packages this project references that have a 1:1 safe
+    /// replacement (e.g. Oracle.DataAccess.Client -> Oracle.ManagedDataAccess.Client).</summary>
+    private Dictionary<string, string> NamespaceSwapsFor(ProjInfo info)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in info.PackageLines)
+        {
+            var e = LibraryReplacements.Lookup(IncludeNameOf(line));
+            if (e is { NamespaceFrom: { } from, NamespaceTo: { } to }) map[from] = to;
+        }
+        return map;
+    }
+
+    /// <summary>Applies the namespace swaps and prepends a [PORTAR] header to a portable file that still uses
+    /// Windows-only APIs (compiles on net8.0, throws on Linux until rewritten with the given guidance).</summary>
+    private string TransformPortable(ProjInfo info, string rel, string content, IReadOnlyDictionary<string, string> nsSwaps)
+    {
+        foreach (var (from, to) in nsSwaps)
+            content = System.Text.RegularExpressions.Regex.Replace(content, $@"\b{System.Text.RegularExpressions.Regex.Escape(from)}\b", to);
+
+        var flagged = info.Findings.Where(f => string.Equals(f.File, rel, StringComparison.OrdinalIgnoreCase) && !IsGuiCategory(f.Categoria)).ToList();
+        if (flagged.Count == 0) return content;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("// [PORTAR] Este fichero usa APIs solo-Windows. Compila en net8.0 pero puede fallar en Linux");
+        sb.AppendLine("// en tiempo de ejecución hasta reescribirlo con la librería/solución multiplataforma indicada:");
+        foreach (var f in flagged.OrderBy(f => f.Line).Take(20))
+            sb.AppendLine($"//   L{f.Line} [{f.Categoria}] {f.Symbol}: {f.ComoCorregir}");
+        sb.AppendLine();
+        return sb.ToString() + content;
+    }
+
+    /// <summary>Builds the code overrides (namespace swaps + [PORTAR] marks) for a set of portable files,
+    /// on top of any base overrides (e.g. the seam-injected content).</summary>
+    private Dictionary<string, string> BuildPortableOverrides(ProjInfo info, IEnumerable<(string Abs, string Rel)> files,
+        IReadOnlyDictionary<string, string> nsSwaps, IReadOnlyDictionary<string, string>? baseOverrides)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in files)
+        {
+            var content = baseOverrides is not null && baseOverrides.TryGetValue(f.Rel, out var oc) ? oc : ReadTextCached(f.Abs);
+            result[f.Rel] = TransformPortable(info, f.Rel, content, nsSwaps);
+        }
+        return result;
+    }
 
     /// <summary>Heurística de portabilidad de un proyecto EXTERNO (no reescrito): portable si su TFM no
     /// apunta a *-windows y no usa WPF/WinForms. Si no se puede leer, se considera NO portable (conservador:
@@ -1123,13 +1239,15 @@ public sealed class SolutionRewriter
                 all.Add((f.Abs, f.Rel, info));
 
         var winTypes = new HashSet<string>(StringComparer.Ordinal);
-        // Semilla.
+        // Seed: ONLY the GUI signals (UI findings + WPF/WinForms base types). Non-GUI Windows APIs
+        // (Registry, EventLog, P/Invoke, crypto...) no longer send a file to the Windows side: they stay
+        // portable (library swap + compile-enabling package + [PORTAR] mark).
         foreach (var (abs, rel, info) in all)
         {
             var ft = FileTypesOf(abs);
-            if (info.FindingFiles.Contains(rel) || ft.DerivesWinBase) winTypes.UnionWith(ft.Declared);
+            if (info.GuiFindingFiles.Contains(rel) || ft.DerivesWinBase) winTypes.UnionWith(ft.Declared);
         }
-        // Propagación a punto fijo.
+        // Propagate to a fixpoint: a type that (transitively) uses a GUI type is also GUI.
         bool changed = true; int guard = 0;
         while (changed && guard++ < 100)
         {
@@ -1137,7 +1255,7 @@ public sealed class SolutionRewriter
             foreach (var (abs, rel, info) in all)
             {
                 var ft = FileTypesOf(abs);
-                bool win = info.FindingFiles.Contains(rel) || ft.DerivesWinBase
+                bool win = info.GuiFindingFiles.Contains(rel) || ft.DerivesWinBase
                            || ft.Declared.Overlaps(winTypes) || ft.Referenced.Overlaps(winTypes);
                 if (win)
                     foreach (var t in ft.Declared)
@@ -1147,16 +1265,21 @@ public sealed class SolutionRewriter
         return winTypes;
     }
 
-    /// <summary>True si el fichero debe ir al lado Windows: hallazgo directo, code-behind XAML, punto de
-    /// entrada, hereda de un tipo base de Windows, o declara/usa (transitivamente) un tipo de Windows.</summary>
+    /// <summary>True if the file must go to the Windows side: it is GUI (WPF/WinForms) — a UI finding, a
+    /// .xaml.cs code-behind, the entry point of a GUI app, derives from a WPF/WinForms base type, or
+    /// declares/uses (transitively) a GUI type. Non-GUI Windows APIs stay portable.</summary>
     private bool FileTouchesWindows(string abs, string rel, ProjInfo info, HashSet<string> winTypes)
     {
-        if (info.FindingFiles.Contains(rel)) return true;
+        if (info.GuiFindingFiles.Contains(rel)) return true;
         if (rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)) return true;
-        if (IsEntryPoint(abs)) return true;
+        if (IsEntryPoint(abs) && (info.UseWpf || info.UseWinForms)) return true; // only a GUI app's entry point
         var ft = FileTypesOf(abs);
         return ft.DerivesWinBase || ft.Declared.Overlaps(winTypes) || ft.Referenced.Overlaps(winTypes);
     }
+
+    /// <summary>True if a source-finding category is a GUI (graphical interface) dependency (WPF/WinForms).</summary>
+    private static bool IsGuiCategory(string categoria) =>
+        categoria.Equals("UI", StringComparison.OrdinalIgnoreCase);
 
     private static void RecreateDir(string dir)
     {

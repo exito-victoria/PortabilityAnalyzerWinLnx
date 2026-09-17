@@ -138,17 +138,17 @@ Los proyectos generados **compilan** (validado); quedan listos a falta de conect
 
 ## Reescritura completa de la solución (`--rewrite`)
 
-A diferencia del *split* por-proyecto (basado en `--roles`), **`--rewrite`** reescribe la **solución entera**
-a una **solución nueva hermana** (nunca toca la original) donde **todos** los proyectos se separan según sus
-dependencias de Windows. Si se pasa `--rewrite`, **NO** se genera el scaffold antiguo (`proyectos-separados/` +
-`SPLIT-NOTES`): la reescritura lo sustituye.
+**`--rewrite`** reescribe la **solución entera** a una **solución nueva hermana** (nunca toca la original) con
+enfoque **library-first, una sola línea de código**: **solo la interfaz gráfica (WPF/WinForms) se mantiene en
+Windows** y **el resto del código se hace portable** (`net8.0`) usando **librerías multiplataforma**. Si se pasa
+`--rewrite`, **NO** se genera el scaffold antiguo (`proyectos-separados/` + `SPLIT-NOTES`): lo sustituye.
 
 Cada proyecto se clasifica y emite así:
 
-- **Portable** (sin dependencias de Windows) → un único proyecto `net8.0`. Los que ya eran `net8.0` (p. ej.
-  los `*Multi`) se copian **sin cambios**; solo se separan si tienen dependencias reales de Windows.
-- **Separable** → `X.Core` (`net8.0`, portable) + `X.Windows` (`net8.0-windows`).
-- **SoloWindows** (todo depende de Windows: UI / punto de entrada) → `net8.0-windows`.
+- **Portable** (sin GUI) → un único proyecto `net8.0`, aunque use APIs de Windows NO gráficas (Registro,
+  EventLog, P/Invoke, cripto…): esas se dejan portables (ver abajo). Los que ya eran `net8.0` se copian sin cambios.
+- **Separable** (mezcla GUI + lógica) → `X.Windows` (`net8.0-windows`, **solo la GUI**) + `X.Core` (`net8.0`, el resto portable).
+- **SoloWindows** (todo es GUI) → `net8.0-windows`.
 - **Excluido** (en `--rewrite-exclude` o en `noModificables`) → se **copia entero**, sin separar.
 
 Qué hace, ya **implementado** (no son TODOs):
@@ -158,16 +158,23 @@ Qué hace, ya **implementado** (no son TODOs):
   (usando entonces los `<Compile Include>`), y las **carpetas/ficheros ignorados** por `.gitignore` (de la solución
   y de cada proyecto). Así no se arrastran ficheros que no forman parte del build (generados, backups, carpetas
   excluidas). Lo omitido se registra en un aviso.
-- **Propagación transitiva de "Windows"** por el grafo de tipos de **toda la solución** (herencia **y uso** de
-  tipos, **entre proyectos**), sembrando desde los hallazgos y desde los tipos base de WPF/WinForms
-  (`Freezable`, `DependencyObject`, `Window`…). Un fichero que —directa o transitivamente— necesita un tipo de
-  Windows acaba en `.Windows`; así el `.Core` queda **realmente portable**. Ej.: si `DBHandler` tiene un campo
-  de un tipo de otro proyecto que es de Windows, o si `MessageItem → BDUtils → ViewModels → ViewModelBase`,
-  todos van a `.Windows`.
-- **Seams automáticos con DI**: cuando un fichero portable del núcleo solo usa una clase Windows **del mismo
-  proyecto** de forma inyectable (campo privado `new T()`), se extrae su **interfaz** al núcleo, la clase Windows
-  la implementa, y el consumidor la recibe **por constructor**. Se genera el **registro DI**
-  `SeamRegistration.AddWindowsSeams()` en el proyecto `.Windows` (solo falta invocarlo en el arranque).
+- **Solo la GUI va a Windows**: se marca como Windows únicamente lo **gráfico** (WPF/WinForms): usos de
+  `System.Windows`/`System.Windows.Forms`, tipos que heredan de `Window`/`Control`/`DependencyObject`/`Freezable`…,
+  `.xaml.cs` y el punto de entrada de una app con GUI. Esa "GUI-idad" se **propaga por el grafo de tipos** de toda
+  la solución (herencia y uso), de modo que un ViewModel y todo lo que lo use acaban en `.Windows`.
+- **El resto del código es portable con librerías multiplataforma** (no se manda a Windows por usar Registro/
+  EventLog/etc.):
+  - **Swap de paquete NuGet**: los paquetes solo-Windows con equivalente se **cambian** en el `.csproj` portable
+    (p. ej. `Oracle.DataAccess` → `Oracle.ManagedDataAccess.Core`, `System.Data.SqlClient` → `Microsoft.Data.SqlClient`),
+    con el **swap de `using`/namespace 1:1** aplicado al código.
+  - **Paquete que habilita la compilación**: para APIs del BCL solo-Windows (Registro, EventLog, WMI, identidad…)
+    se **añade el paquete net8.0** correspondiente para que el proyecto **compile** (se ejecuta en Windows y lanza
+    `PlatformNotSupportedException` en Linux hasta reescribir esa parte).
+  - **Marca `[PORTAR]`**: cada fichero portable que aún usa una API solo-Windows lleva una **cabecera** con la
+    línea, el símbolo y la **librería/solución recomendada** para reescribirlo.
+- **Seam como fallback**: si un consumidor del núcleo usa una clase Windows del **mismo proyecto** de forma
+  inyectable y sin librería equivalente, se extrae una **interfaz** al núcleo, la clase Windows la implementa y se
+  genera el registro DI `SeamRegistration.AddWindowsSeams()`.
 - **Referencias recableadas**: `.Core` solo referencia núcleos portables; `.Windows` referencia su `.Core` y las
   partes `.Windows`; los **proyectos externos** a la solución se conservan apuntando a su `.csproj` original; los
   **excluidos** referencian el lado `.Windows` (superset).
