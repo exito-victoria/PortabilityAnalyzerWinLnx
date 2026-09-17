@@ -100,7 +100,8 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
 
 - **General** (Markdown y **Word en español e inglés** — `informe.docx` e `informe_EN.docx`): resumen, **coste por bloque**, **orden de compilación** (con Target Framework),
   **recomendación de arquitectura** con un **ejemplo de migración** real y la definición de «seam»,
-  **análisis de terceros**, **terceros no modificables** (restricción + opciones), **impacto por proyecto**
+  **análisis de terceros**, **terceros no modificables** (restricción + opciones), **librerías referenciadas y su
+  equivalente multiplataforma** (paquete de reemplazo o "revisar"), **impacto por proyecto**
   (clases y ficheros afectados), **análisis de código fuente** (dónde y cómo corregir) y un **apéndice de
   equivalencias portables / aislamiento por SO** con fragmentos de código. El Word incluye **Tabla de
   contenido** (con estilos de título) y **repite las cabeceras** de tabla al partir en páginas.
