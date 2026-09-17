@@ -36,6 +36,14 @@ public static class LibraryReplacements
         string NotaEs, string NotaEn);
 
     // Report notes (NotaEs/NotaEn) are user-facing bilingual data, kept in ES/EN on purpose.
+    // Curated from the Microsoft porting guidance: "Port from .NET Framework to .NET"
+    // (learn.microsoft.com/dotnet/core/porting), the "Microsoft.Windows.Compatibility" package docs and the
+    // per-package cross-platform notes on nuget.org / learn.microsoft.com. Statuses:
+    //   Reemplazar = safe drop-in (package swap, kept 1:1, with an optional namespace swap) -> the rewriter
+    //                applies it automatically. Kept minimal on purpose (only true drop-ins).
+    //   Revisar    = Windows-only / not a drop-in: needs a manual rewrite, but a PROPOSED cross-platform
+    //                alternative is offered (Replacement) so the report suggests where to go.
+    //   Multiplataforma = already cross-platform; no change required.
     private static readonly Entry[] Table =
     {
         // --- Windows-only WITH a drop-in replacement (package + 1:1 namespace swap) ---
@@ -47,57 +55,131 @@ public static class LibraryReplacements
             null, null,
             "Variante clásica (apunta a .NET Framework) -> Oracle.ManagedDataAccess.Core para net8.0.",
             "Classic variant (targets .NET Framework) -> Oracle.ManagedDataAccess.Core for net8.0."),
+        new("System.Data.OracleClient", false, LibraryStatus.Reemplazar, "Oracle.ManagedDataAccess.Core", "23.5.1",
+            "System.Data.OracleClient", "Oracle.ManagedDataAccess.Client",
+            "Proveedor Oracle integrado y obsoleto (solo Windows) -> Oracle.ManagedDataAccess.Core (gestionado, multiplataforma).",
+            "Built-in, deprecated Oracle provider (Windows only) -> Oracle.ManagedDataAccess.Core (managed, cross-platform)."),
         new("System.Data.SqlClient", false, LibraryStatus.Reemplazar, "Microsoft.Data.SqlClient", "5.2.2",
             "System.Data.SqlClient", "Microsoft.Data.SqlClient",
             "Cliente SQL Server heredado -> Microsoft.Data.SqlClient (multiplataforma).",
             "Legacy SQL Server client -> Microsoft.Data.SqlClient (cross-platform)."),
 
-        // --- Windows-only WITHOUT a drop-in (manual rewrite following the guidance) ---
+        // --- Windows-only WITHOUT a drop-in (manual rewrite; a portable alternative is proposed) ---
         new("System.Drawing.Common", false, LibraryStatus.Revisar, "SixLabors.ImageSharp", "3.1.5", null, null,
             "Fuera de Windows lanza PlatformNotSupportedException. Migrar a ImageSharp o SkiaSharp.",
             "Throws PlatformNotSupportedException off Windows. Migrate to ImageSharp or SkiaSharp."),
-        new("System.Diagnostics.EventLog", false, LibraryStatus.Revisar, null, null, null, null,
+        new("System.Diagnostics.EventLog", false, LibraryStatus.Revisar, "Microsoft.Extensions.Logging", "8.0.1", null, null,
             "Visor de eventos (solo Windows). Migrar el logging a Serilog / Microsoft.Extensions.Logging.",
             "Event Viewer (Windows only). Migrate logging to Serilog / Microsoft.Extensions.Logging."),
-        new("Microsoft.Win32.Registry", false, LibraryStatus.Revisar, null, null, null, null,
+        new("System.Diagnostics.PerformanceCounter", false, LibraryStatus.Revisar, "System.Diagnostics.DiagnosticSource", "8.0.1", null, null,
+            "Contadores de rendimiento (solo Windows). Migrar a EventCounters / System.Diagnostics.Metrics.",
+            "Performance counters (Windows only). Migrate to EventCounters / System.Diagnostics.Metrics."),
+        new("Microsoft.Win32.Registry", false, LibraryStatus.Revisar, "Microsoft.Extensions.Configuration", "8.0.0", null, null,
             "Registro de Windows. Externalizar a Microsoft.Extensions.Configuration (appsettings/variables de entorno).",
             "Windows Registry. Externalize to Microsoft.Extensions.Configuration (appsettings/env vars)."),
         new("Microsoft.Win32.SystemEvents", false, LibraryStatus.Revisar, null, null, null, null,
             "Eventos del sistema de Windows. Aislar tras una interfaz; sin equivalente directo multiplataforma.",
             "Windows system events. Isolate behind an interface; no direct cross-platform equivalent."),
-        new("System.Management", false, LibraryStatus.Revisar, null, null, null, null,
+        new("System.Management", false, LibraryStatus.Revisar, "System.Runtime.InteropServices.RuntimeInformation", null, null, null,
             "WMI (solo Windows). Parte de la info la da RuntimeInformation; el resto, aislar tras una interfaz.",
             "WMI (Windows only). Part of the info is provided by RuntimeInformation; isolate the rest behind an interface."),
         new("System.DirectoryServices", true, LibraryStatus.Revisar, "System.DirectoryServices.Protocols", "8.0.0", null, null,
             "AD nativo (Windows). Usar System.DirectoryServices.Protocols o Novell.Directory.Ldap (multiplataforma).",
             "Native AD (Windows). Use System.DirectoryServices.Protocols or Novell.Directory.Ldap (cross-platform)."),
-        new("System.ServiceProcess.ServiceController", false, LibraryStatus.Revisar, null, null, null, null,
-            "Servicios de Windows. Usar Microsoft.Extensions.Hosting para un host portable.",
-            "Windows Services. Use Microsoft.Extensions.Hosting for a portable host."),
+        new("System.ServiceProcess.ServiceController", false, LibraryStatus.Revisar, "Microsoft.Extensions.Hosting", "8.0.1", null, null,
+            "Servicios de Windows. Usar Microsoft.Extensions.Hosting (host portable) + systemd/servicio nativo.",
+            "Windows Services. Use Microsoft.Extensions.Hosting (portable host) + systemd/native service."),
         new("System.Security.Cryptography.ProtectedData", false, LibraryStatus.Revisar, null, null, null, null,
             "DPAPI (solo Windows). Sustituir por AES con clave de un gestor de secretos (KMS). Planificar re-cifrado.",
             "DPAPI (Windows only). Replace with AES using a key from a secrets manager (KMS). Plan re-encryption."),
+        new("System.Security.Cryptography.Cng", false, LibraryStatus.Revisar, null, null, null, null,
+            "CNG (solo Windows). Usar las factorías portables (RSA.Create/ECDsa.Create) en lugar de *Cng.",
+            "CNG (Windows only). Use the portable factories (RSA.Create/ECDsa.Create) instead of *Cng."),
+        new("System.Security.AccessControl", true, LibraryStatus.Revisar, null, null, null, null,
+            "ACLs de Windows (solo Windows). En Linux usar permisos POSIX (Unix file mode) tras una interfaz.",
+            "Windows ACLs (Windows only). On Linux use POSIX permissions (Unix file mode) behind an interface."),
+        new("System.Security.Principal.Windows", false, LibraryStatus.Revisar, null, null, null, null,
+            "Identidad de Windows (solo Windows). Aislar tras una interfaz IUserIdentity con implementación por SO.",
+            "Windows identity (Windows only). Isolate behind an IUserIdentity interface with a per-OS implementation."),
         new("Microsoft.Office.Interop", true, LibraryStatus.Revisar, "DocumentFormat.OpenXml", "3.1.0", null, null,
             "Automatización de Office (COM, Windows). Usar OpenXML SDK o ClosedXML (multiplataforma).",
             "Office automation (COM, Windows). Use the OpenXML SDK or ClosedXML (cross-platform)."),
         new("System.Speech", false, LibraryStatus.Revisar, null, null, null, null,
             "APIs de voz de Windows. Usar un servicio de voz multiplataforma (motor externo/cloud).",
             "Windows speech APIs. Use a cross-platform speech service (external/cloud engine)."),
-        new("System.Messaging", false, LibraryStatus.Revisar, null, null, null, null,
+        new("System.Messaging", false, LibraryStatus.Revisar, "RabbitMQ.Client", "6.8.1", null, null,
             "MSMQ (solo Windows). Migrar a RabbitMQ, Azure Service Bus u otra cola multiplataforma.",
             "MSMQ (Windows only). Migrate to RabbitMQ, Azure Service Bus or another cross-platform queue."),
+        new("System.Configuration.ConfigurationManager", false, LibraryStatus.Revisar, "Microsoft.Extensions.Configuration", "8.0.0", null, null,
+            "app.config/ConfigurationManager (patrón .NET Framework). Migrar a Microsoft.Extensions.Configuration (appsettings.json).",
+            "app.config/ConfigurationManager (.NET Framework pattern). Migrate to Microsoft.Extensions.Configuration (appsettings.json)."),
+        new("System.Runtime.Caching", false, LibraryStatus.Revisar, "Microsoft.Extensions.Caching.Memory", "8.0.1", null, null,
+            "MemoryCache clásico. Migrar a Microsoft.Extensions.Caching.Memory (IMemoryCache, multiplataforma).",
+            "Classic MemoryCache. Migrate to Microsoft.Extensions.Caching.Memory (IMemoryCache, cross-platform)."),
+        new("EntityFramework", false, LibraryStatus.Revisar, "Microsoft.EntityFrameworkCore", "8.0.10", null, null,
+            "EF6 (apunta a .NET Framework). Migrar a Microsoft.EntityFrameworkCore (revisar cambios de API).",
+            "EF6 (targets .NET Framework). Migrate to Microsoft.EntityFrameworkCore (review API changes)."),
+        new("System.Web", true, LibraryStatus.Revisar, "Microsoft.AspNetCore.App", null, null, null,
+            "ASP.NET clásico (System.Web, solo Windows/IIS). Reescribir sobre ASP.NET Core.",
+            "Classic ASP.NET (System.Web, Windows/IIS only). Rewrite on ASP.NET Core."),
+        new("Microsoft.Owin", true, LibraryStatus.Revisar, "Microsoft.AspNetCore.App", null, null, null,
+            "OWIN/Katana. Reescribir el middleware sobre ASP.NET Core.",
+            "OWIN/Katana. Rewrite the middleware on ASP.NET Core."),
+        new("System.ServiceModel", true, LibraryStatus.Revisar, "CoreWCF", "1.6.0", null, null,
+            "WCF (System.ServiceModel). Cliente: System.ServiceModel.* (paquetes). Servidor: CoreWCF o gRPC.",
+            "WCF (System.ServiceModel). Client: System.ServiceModel.* packages. Server: CoreWCF or gRPC."),
+        new("System.Runtime.Remoting", true, LibraryStatus.Revisar, "Grpc.AspNetCore", "2.66.0", null, null,
+            ".NET Remoting (eliminado en .NET moderno). Migrar a gRPC o HTTP/REST.",
+            ".NET Remoting (removed in modern .NET). Migrate to gRPC or HTTP/REST."),
+        new("System.EnterpriseServices", true, LibraryStatus.Revisar, null, null, null, null,
+            "COM+ / Enterprise Services (solo Windows). Reemplazar por transacciones/host multiplataforma.",
+            "COM+ / Enterprise Services (Windows only). Replace with a cross-platform transaction/host model."),
+        new("System.Windows.Forms.DataVisualization", true, LibraryStatus.Revisar, "ScottPlot", "5.0.47", null, null,
+            "Gráficas de WinForms (solo Windows). Usar ScottPlot / LiveCharts u OxyPlot (multiplataforma).",
+            "WinForms charts (Windows only). Use ScottPlot / LiveCharts or OxyPlot (cross-platform)."),
+        new("CrystalDecisions", true, LibraryStatus.Revisar, "QuestPDF", "2024.10.0", null, null,
+            "Crystal Reports (solo Windows). Usar QuestPDF, iText o el motor de informes que aplique (multiplataforma).",
+            "Crystal Reports (Windows only). Use QuestPDF, iText or a suitable reporting engine (cross-platform)."),
 
         // --- Known CROSS-PLATFORM (no change required) ---
         new("Oracle.ManagedDataAccess.Core", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("Microsoft.Data.SqlClient", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Microsoft.EntityFrameworkCore", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("Microsoft.Extensions.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Microsoft.AspNetCore.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("Newtonsoft.Json", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("System.Text.Json", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("System.IO.Ports", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (SerialPort funciona en Linux).", "Already cross-platform (SerialPort works on Linux)."),
+        new("System.Text.Encoding.CodePages", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (habilita code pages heredados).", "Already cross-platform (enables legacy code pages)."),
+        new("Microsoft.VisualBasic", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (Microsoft.VisualBasic.Core).", "Already cross-platform (Microsoft.VisualBasic.Core)."),
         new("Serilog", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("NLog", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("log4net", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("Dapper", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("AutoMapper", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("MediatR", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("FluentValidation", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Polly", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("RestSharp", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Refit", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Npgsql", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("MySqlConnector", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("MySql.Data", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("StackExchange.Redis", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("MongoDB.Driver", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Quartz", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Hangfire", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("ClosedXML", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("DocumentFormat.OpenXml", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("CsvHelper", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("QuestPDF", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("itext7", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("SkiaSharp", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("SixLabors.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("xunit", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("NUnit", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Moq", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("FluentAssertions", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
     };
 
     /// <summary>Finds the catalog entry for a package (exact or prefix match). Null if not present.</summary>
@@ -119,7 +201,8 @@ public static class LibraryReplacements
             return new ReferencedLibrary(package, version, LibraryStatus.Revisar, null, null,
                 "Sin dato en el catálogo: probablemente multiplataforma; verificar en nuget.org (soporte net8.0 y RID no-Windows).",
                 "Not in the catalog: probably cross-platform; verify on nuget.org (net8.0 support and non-Windows RID).");
-        var repl = e.Status == LibraryStatus.Reemplazar ? e.Replacement : null;
-        return new ReferencedLibrary(package, version, e.Status, repl, e.ReplacementVersion, e.NotaEs, e.NotaEn);
+        // Surface the proposed alternative for BOTH statuses: "Reemplazar" is a safe drop-in the rewriter
+        // applies automatically; "Revisar" is a suggested cross-platform target for a manual migration.
+        return new ReferencedLibrary(package, version, e.Status, e.Replacement, e.ReplacementVersion, e.NotaEs, e.NotaEn);
     }
 }

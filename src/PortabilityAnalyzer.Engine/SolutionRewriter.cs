@@ -14,9 +14,11 @@ namespace PortabilityAnalyzer.Engine;
 /// <b>Portable</b> (net8.0, sin dependencias de Windows), <b>Separable</b> (se divide en
 /// <c>X.Core</c> net8.0 + <c>X.Windows</c> net8.0-windows) o <b>SoloWindows</b> (net8.0-windows), se
 /// recablean todas las <c>ProjectReference</c> entre los proyectos generados y se regenera el
-/// <c>.sln</c>. Los namespaces se conservan (no se rebasan) para no romper las referencias entre
-/// proyectos. El núcleo portable queda compilable en net8.0; lo específico de Windows queda aislado en
-/// su proyecto net8.0-windows, listo para que otro equipo aporte la implementación de otros SO.
+/// <c>.sln</c>. En los proyectos separados el <b>namespace se rebasa</b> al nuevo nombre
+/// (<c>X</c> → <c>X.Core</c> / <c>X.Windows</c>) y se actualizan todas las referencias de la solución. El
+/// núcleo portable queda <b>100% portable</b> y compilable en net8.0 (solo permanecen ahí las clases sin
+/// dependencia de Windows o resueltas por librería); lo específico de Windows queda aislado en su proyecto
+/// net8.0-windows, con el cableado por DI (seams) generado, listo para que otro equipo aporte otros SO.
 /// </summary>
 public sealed class SolutionRewriter
 {
@@ -82,6 +84,10 @@ public sealed class SolutionRewriter
         public List<(string Abs, string Rel)> ContentFiles = new();  // no-.cs (xaml/resx/...)
         public HashSet<string> FindingFiles = new(StringComparer.OrdinalIgnoreCase); // .cs with any Windows finding
         public HashSet<string> GuiFindingFiles = new(StringComparer.OrdinalIgnoreCase); // .cs with a GUI (UI) finding
+        // .cs that MUST go to the Windows side: they have a GUI finding OR a non-GUI Windows finding with no
+        // cross-platform library replacement (Registry, EventLog, WMI, DPAPI, P/Invoke...). Files whose only
+        // Windows finding is a clean library swap (e.g. Database -> managed driver) stay portable in .Core.
+        public HashSet<string> WinDependentFiles = new(StringComparer.OrdinalIgnoreCase);
         public List<SourceFinding> Findings = new();     // this project's source findings (for marking/packages)
         public List<(string Abs, string Rel)> WinCode = new();
         public List<(string Abs, string Rel)> PortableCode = new();
@@ -170,6 +176,9 @@ public sealed class SolutionRewriter
             info.Findings = findings.Where(f => string.Equals(f.Project, name, StringComparison.OrdinalIgnoreCase)).ToList();
             info.FindingFiles = info.Findings.Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
             info.GuiFindingFiles = info.Findings.Where(f => IsGuiCategory(f.Categoria)).Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // A file is Windows-bound if it has a GUI finding OR a Windows finding with no clean library swap.
+            info.WinDependentFiles = info.Findings.Where(f => IsGuiCategory(f.Categoria) || !IsPortableViaSwap(f.Categoria))
+                                                  .Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var f in info.CodeFiles)
                 if (IsEntryPoint(f.Abs)) { info.HasEntryPoint = true; break; }
 
@@ -278,11 +287,27 @@ public sealed class SolutionRewriter
             };
         }
 
+        // 3.5) Run the seam pass for each separable project UP FRONT: its result is the final Core/Windows
+        // split, which the namespace rebasing below depends on. (Also collected for the migration report.)
+        var seamResults = new Dictionary<ProjInfo, SeamPassResult>();
+        foreach (var info in infos)
+            if (!info.Excluded && info.Kind == Kind.Separable)
+                seamResults[info] = RunSeamPass(info, winTypes);
+
+        // 3.6) Build the namespace rebaser. Only SEPARABLE projects are rebased: X.Core files get
+        // 'namespace X.Core[.Sub]' and X.Windows files get 'namespace X.Windows[.Sub]'; every reference across
+        // the generated solution (usings + fully-qualified names) is updated to the new namespaces.
+        var splits = infos.Where(i => !i.Excluded && i.Kind == Kind.Separable)
+            .Select(i => (OrigRoot: i.RootNamespace ?? i.Name, CoreRoot: i.CoreName!, WinRoot: i.WinName!)).ToList();
+        var rebaser = BuildRebaser(infos, splits, seamResults);
+
         // 4) Preparar salida.
         RecreateDir(outputDir);
         var emitted = new List<(string Name, string RelCsproj)>();  // para el .sln
         var rewritten = new List<RewrittenProject>();
         var allSeams = new List<(string Project, string Concrete, string Interface, string Namespace)>();
+        // Per entry-point output project: the seam-bearing Windows projects it can register via DI.
+        var entryPointOutputs = new List<(string OutName, string OutDir, ProjInfo Info)>();
 
         foreach (var info in infos)
         {
@@ -292,8 +317,10 @@ public sealed class SolutionRewriter
             {
                 var outName = info.Name;
                 var projDir = Path.Combine(outputDir, outName);
-                CopyCode(info.CodeFiles, info.Dir, projDir, outName);
+                // Not split -> own namespace preserved; references to split projects resolve to the Windows side.
+                CopyCode(info.CodeFiles, info.Dir, projDir, outName, null, rebaser, NamespaceRebaser.Side.Windows, null);
                 CopyContent(info.ContentFiles, projDir);
+                if (info.HasEntryPoint) entryPointOutputs.Add((outName, projDir, info));
                 var refs = info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList();
                 var relPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
                 var tfm = string.IsNullOrWhiteSpace(info.Tfm) ? "net8.0-windows" : info.Tfm!;
@@ -315,8 +342,11 @@ public sealed class SolutionRewriter
                     var portFiles = info.PortableCode.Concat(info.WinCode).ToList();
                     // Library-first: swap safe namespaces and mark the Windows-only APIs that remain.
                     var nsSwaps = NamespaceSwapsFor(info);
-                    CopyCode(portFiles, info.Dir, projDir, outName, BuildPortableOverrides(info, portFiles, nsSwaps, null));
+                    // Not split -> own namespace preserved; references to split projects resolve to the Core side.
+                    CopyCode(portFiles, info.Dir, projDir, outName, BuildPortableOverrides(info, portFiles, nsSwaps, null),
+                        rebaser, NamespaceRebaser.Side.Core, null);
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
+                    if (info.HasEntryPoint) entryPointOutputs.Add((outName, projDir, info));
                     var refs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null && WinSideRef(rn) is not null)
@@ -337,8 +367,10 @@ public sealed class SolutionRewriter
                 {
                     var outName = info.WinName!;
                     var projDir = Path.Combine(outputDir, outName);
-                    CopyCode(info.PortableCode.Concat(info.WinCode), info.Dir, projDir, outName);
+                    // Not split (whole project is Windows) -> own namespace preserved; refs to splits -> Windows side.
+                    CopyCode(info.PortableCode.Concat(info.WinCode), info.Dir, projDir, outName, null, rebaser, NamespaceRebaser.Side.Windows, null);
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
+                    if (info.HasEntryPoint) entryPointOutputs.Add((outName, projDir, info));
                     var refs = info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     var winOnlyRelPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0-windows", info.PackageLines, info.UseWpf, info.UseWinForms,
@@ -356,19 +388,23 @@ public sealed class SolutionRewriter
                     var coreDir = Path.Combine(outputDir, coreName);
                     var winDir = Path.Combine(outputDir, winName);
 
-                    // Pase de seams: intenta mantener en el núcleo los ficheros portables que dependen de
-                    // clases Windows, extrayendo una interfaz e inyectándola por constructor.
-                    var seam = RunSeamPass(info, winTypes);
+                    // Seam pass already computed up front (the final Core/Windows split).
+                    var seam = seamResults[info];
                     warnings.AddRange(seam.Warnings);
                     foreach (var s in seam.Seams) allSeams.Add((info.Name, s.Concrete, s.Interface, s.Namespace));
+                    var origRoot = info.RootNamespace ?? info.Name;
 
-                    // CORE (net8.0): portable files (with seam injection rewrites) + seam interfaces.
-                    // Library-first: swap safe namespaces and mark the Windows-only APIs that remain portable.
+                    // CORE (net8.0): portable files (with seam injection rewrites) + seam interfaces, all rebased
+                    // to 'coreName'. Library-first: swap safe namespaces and mark the Windows-only APIs that remain.
                     var coreNsSwaps = NamespaceSwapsFor(info);
                     var coreOverrides = BuildPortableOverrides(info, seam.Portable, coreNsSwaps, seam.CoreOverrides);
-                    CopyCode(seam.Portable, info.Dir, coreDir, coreName, coreOverrides);
+                    CopyCode(seam.Portable, info.Dir, coreDir, coreName, coreOverrides, rebaser, NamespaceRebaser.Side.Core, coreName);
                     CopyContent(info.PortableContent, coreDir);
-                    WriteGenerated(seam.CoreExtraFiles, coreDir);
+                    // Seam interfaces carry the concrete's original namespace -> rebase them to the Core side.
+                    var coreExtra = rebaser is null
+                        ? seam.CoreExtraFiles
+                        : seam.CoreExtraFiles.Select(f => (f.Rel, rebaser.Rewrite(f.Content, NamespaceRebaser.Side.Core))).ToList();
+                    WriteGenerated(coreExtra, coreDir);
                     var coreRefs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null)
@@ -378,20 +414,36 @@ public sealed class SolutionRewriter
                         null, coreRefs, coreRelPaths, windowsOnlyFilter: false, source: info);
                     emitted.Add((coreName, $"{coreName}\\{coreName}.csproj"));
 
-                    // WINDOWS (net8.0-windows): ficheros Windows (algunos implementan ya la interfaz de seam)
-                    // + referencia a su propio núcleo.
-                    CopyCode(seam.Win, info.Dir, winDir, winName, seam.WinOverrides);
+                    // WINDOWS (net8.0-windows): Windows files rebased to 'winName'. Because the project was split,
+                    // a Windows file may reference (by simple name, same original namespace) a type that moved to
+                    // the sibling .Core — or a seam interface that now lives there. Import every .Core namespace of
+                    // THIS project so those references resolve.
+                    var winPostUsings = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+                    if (rebaser is not null)
+                    {
+                        var coreNs = seam.Portable.SelectMany(f => DeclaredNamespaces(f.Abs))
+                            .Concat(seam.Seams.Select(s => s.Namespace))
+                            .Select(ns => rebaser.RebaseName(ns, NamespaceRebaser.Side.Core))
+                            .Where(n => !string.IsNullOrEmpty(n)).Distinct().ToList();
+                        if (coreNs.Count > 0)
+                            foreach (var f in seam.Win) winPostUsings[f.Rel] = coreNs;
+                    }
+                    CopyCode(seam.Win, info.Dir, winDir, winName, seam.WinOverrides, rebaser, NamespaceRebaser.Side.Windows, winName, winPostUsings);
                     CopyContent(info.WinContent, winDir);
 
                     // Si hubo seams, se GENERA el registro DI (composition root) con las implementaciones
-                    // Windows, para que el cableado quede hecho (solo falta invocarlo en el arranque).
+                    // Windows (namespaces ya rebasados), para que el cableado quede hecho.
                     var winPkgs = info.PackageLines.ToList();
                     if (seam.Seams.Count > 0)
                     {
-                        WriteGenerated(new[] { ("SeamRegistration.cs", BuildSeamRegistration(winName, seam.Seams)) }, winDir);
+                        var regSeams = seam.Seams.Select(s => (s.Concrete, s.Interface,
+                            CoreNs: rebaser?.RebaseName(s.Namespace, NamespaceRebaser.Side.Core) ?? s.Namespace,
+                            WinNs: rebaser?.RebaseName(s.Namespace, NamespaceRebaser.Side.Windows) ?? s.Namespace)).ToList();
+                        WriteGenerated(new[] { ("SeamRegistration.cs", BuildSeamRegistration(winName, regSeams)) }, winDir);
                         if (!winPkgs.Any(p => p.Contains("Microsoft.Extensions.DependencyInjection.Abstractions", StringComparison.OrdinalIgnoreCase)))
                             winPkgs.Add("<PackageReference Include=\"Microsoft.Extensions.DependencyInjection.Abstractions\" Version=\"8.0.2\" />");
                     }
+                    if (info.HasEntryPoint) entryPointOutputs.Add((winName, winDir, info));
 
                     var winRefs = new List<string> { coreName };
                     winRefs.AddRange(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!));
@@ -409,6 +461,32 @@ public sealed class SolutionRewriter
                     break;
                 }
             }
+        }
+
+        // 4b) DI wiring in generated code: in each entry-point project, generate a Composition Root that builds
+        // a ServiceCollection, calls AddWindowsSeams() for every seam-bearing Windows project it references and
+        // returns the provider; then try to invoke it from the actual entry point so it is verifiable.
+        var seamWinProjects = seamResults.Where(kv => kv.Value.Seams.Count > 0)
+            .Select(kv => kv.Key.WinName!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (outName, outDir, info) in entryPointOutputs)
+        {
+            var reachable = new List<string>();
+            if (info.Kind == Kind.Separable && seamResults.TryGetValue(info, out var ownSeam) && ownSeam.Seams.Count > 0)
+                reachable.Add(info.WinName!);
+            foreach (var rn in info.RefNames)
+            {
+                var w = WinSideRef(rn);
+                if (w is not null && seamWinProjects.Contains(w)) reachable.Add(w);
+            }
+            reachable = reachable.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (reachable.Count == 0) continue; // no seams to register from this entry point
+
+            WriteCompositionRoot(outDir, outName, reachable);
+            EnsureDependencyInjectionPackage(outDir, outName);
+            if (!TryInvokeCompositionRoot(outDir, outName))
+                warnings.Add($"'{outName}': se generó CompositionRoot.cs (AddWindowsSeams) pero no se pudo insertar " +
+                             "la llamada en el punto de entrada automáticamente (p. ej. WPF con Main autogenerado). " +
+                             "Invócalo desde tu arranque: var provider = CompositionRoot.Build(); (en WPF, en App.OnStartup).");
         }
 
         // 5) Generar el .sln, reconstruir el orden de compilación y el README de migración.
@@ -431,44 +509,186 @@ public sealed class SolutionRewriter
     // ---------------------------------------------------------------------------------------------
 
     private void CopyCode(IEnumerable<(string Abs, string Rel)> files, string srcDir, string outDir, string outProject,
-        IReadOnlyDictionary<string, string>? overrides = null)
+        IReadOnlyDictionary<string, string>? overrides,
+        NamespaceRebaser? rebaser, NamespaceRebaser.Side side, string? rebasedRoot,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? postRebaseUsings = null)
     {
         foreach (var f in files)
         {
             var target = Path.Combine(outDir, f.Rel);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             var content = overrides is not null && overrides.TryGetValue(f.Rel, out var oc) ? oc : ReadTextCached(f.Abs);
-            var header = $"// [Reescritura multiplataforma] Proyecto {outProject}. Namespace conservado del original.";
+            // Rebase namespaces/references (only touches split projects) exactly ONCE, from the original form.
+            if (rebaser is not null) content = rebaser.Rewrite(content, side);
+            if (postRebaseUsings is not null && postRebaseUsings.TryGetValue(f.Rel, out var extra))
+                content = PrependUsings(content, extra);
+            var header = rebasedRoot is null
+                ? $"// [Cross-platform rewrite] Project {outProject}. Namespace preserved from the original."
+                : $"// [Cross-platform rewrite] Project {outProject}. Namespace rebased to '{rebasedRoot}'.";
             File.WriteAllText(target, header + Environment.NewLine + content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         }
     }
 
-    /// <summary>Genera el registro DI (composition root) con las implementaciones Windows de los seams,
-    /// para que el cableado quede HECHO: basta invocar AddWindowsSeams(...) en el arranque de la app.</summary>
-    private static string BuildSeamRegistration(string winProject, IReadOnlyList<(string Concrete, string Interface, string Namespace)> seams)
+    /// <summary>Prepends the given <c>using</c> directives (skipping any already present). Used to point a
+    /// rebased Windows file at the seam interface namespace that now lives in its sibling <c>.Core</c>.</summary>
+    private static string PrependUsings(string content, IReadOnlyList<string> namespaces)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("// [Reescritura multiplataforma] Registro DI de las implementaciones Windows de los seams.");
-        sb.AppendLine("// Invoca services.AddWindowsSeams() en el Composition Root (arranque) de la aplicación Windows.");
+        foreach (var ns in namespaces)
+            if (!Regex.IsMatch(content, $@"(?m)^\s*using\s+{Regex.Escape(ns)}\s*;"))
+                sb.Append("using ").Append(ns).Append(';').Append(Environment.NewLine);
+        return sb.Length == 0 ? content : sb.ToString() + content;
+    }
+
+    /// <summary>Namespaces declared by a .cs file (empty string for the global namespace), used to build the
+    /// set of namespaces that will exist after rebasing.</summary>
+    private IEnumerable<string> DeclaredNamespaces(string abs)
+    {
+        var root = RootCached(abs);
+        if (root is null) return Array.Empty<string>();
+        var list = root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>().Select(n => n.Name.ToString()).ToList();
+        if (list.Count == 0) list.Add(string.Empty);
+        return list;
+    }
+
+    /// <summary>Builds the namespace rebaser for the SEPARABLE projects (X -> X.Core / X.Windows), collecting
+    /// every new namespace that will exist so references can be resolved. Null if nothing is split.</summary>
+    private NamespaceRebaser? BuildRebaser(List<ProjInfo> infos,
+        List<(string OrigRoot, string CoreRoot, string WinRoot)> splits,
+        IReadOnlyDictionary<ProjInfo, SeamPassResult> seamResults)
+    {
+        if (splits.Count == 0) return null;
+        var pre = new NamespaceRebaser(splits, new HashSet<string>(StringComparer.Ordinal));
+        var existing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var info in infos)
+        {
+            if (info.Excluded || info.Kind != Kind.Separable) continue;
+            var seam = seamResults[info];
+            foreach (var f in seam.Portable)
+                foreach (var ns in DeclaredNamespaces(f.Abs)) existing.Add(pre.RebaseName(ns, NamespaceRebaser.Side.Core));
+            foreach (var f in seam.Win)
+                foreach (var ns in DeclaredNamespaces(f.Abs)) existing.Add(pre.RebaseName(ns, NamespaceRebaser.Side.Windows));
+            // Seam interface files are emitted to Core under the concrete type's original namespace.
+            foreach (var s in seam.Seams) existing.Add(pre.RebaseName(s.Namespace, NamespaceRebaser.Side.Core));
+            existing.Add(info.CoreName!);
+            existing.Add(info.WinName!);
+        }
+        return new NamespaceRebaser(splits, existing);
+    }
+
+    /// <summary>Generates the DI registration (composition root) that binds each seam interface (in .Core) to
+    /// its Windows implementation (in .Windows), so the wiring is DONE: it only needs AddWindowsSeams() to be
+    /// called from the app startup. The Composition Root generated in the entry-point project does exactly that.</summary>
+    private static string BuildSeamRegistration(string winProject,
+        IReadOnlyList<(string Concrete, string Interface, string CoreNs, string WinNs)> seams)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [Cross-platform rewrite] DI registration of the Windows implementations of the seams.");
+        sb.AppendLine("// Call services.AddWindowsSeams() from the Composition Root (startup) of the Windows app.");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine();
         sb.AppendLine($"namespace {winProject};");
         sb.AppendLine();
         sb.AppendLine("public static class SeamRegistration");
         sb.AppendLine("{");
-        sb.AppendLine("    /// <summary>Registra las implementaciones Windows de las interfaces (seams) extraídas al núcleo.</summary>");
+        sb.AppendLine("    /// <summary>Registers the Windows implementations of the interfaces (seams) extracted to the core.</summary>");
         sb.AppendLine("    public static IServiceCollection AddWindowsSeams(this IServiceCollection services)");
         sb.AppendLine("    {");
         foreach (var s in seams)
         {
-            var iface = string.IsNullOrEmpty(s.Namespace) ? s.Interface : $"global::{s.Namespace}.{s.Interface}";
-            var impl = string.IsNullOrEmpty(s.Namespace) ? s.Concrete : $"global::{s.Namespace}.{s.Concrete}";
+            var iface = string.IsNullOrEmpty(s.CoreNs) ? s.Interface : $"global::{s.CoreNs}.{s.Interface}";
+            var impl = string.IsNullOrEmpty(s.WinNs) ? s.Concrete : $"global::{s.WinNs}.{s.Concrete}";
             sb.AppendLine($"        services.AddSingleton<{iface}, {impl}>();");
         }
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
         sb.AppendLine("}");
         return sb.ToString();
+    }
+
+    /// <summary>Generates the Composition Root of an entry-point project: builds a ServiceCollection, registers
+    /// the Windows seam implementations of every reachable seam-bearing Windows project (AddWindowsSeams) and
+    /// returns the provider. This is the DI wiring done in the GENERATED code (not just documented).</summary>
+    private static void WriteCompositionRoot(string outDir, string nsName, IReadOnlyList<string> seamWinProjects)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [Cross-platform rewrite] Composition Root: builds the DI container and registers the Windows");
+        sb.AppendLine("// implementations of the extracted seams. Call CompositionRoot.Build() at application startup.");
+        sb.AppendLine("using System;");
+        sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {nsName};");
+        sb.AppendLine();
+        sb.AppendLine("public static class CompositionRoot");
+        sb.AppendLine("{");
+        sb.AppendLine("    /// <summary>Builds the DI container with the Windows implementations of the extracted seams.</summary>");
+        sb.AppendLine("    public static IServiceProvider Build()");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var services = new ServiceCollection();");
+        foreach (var p in seamWinProjects)
+            sb.AppendLine($"        global::{p}.SeamRegistration.AddWindowsSeams(services);");
+        sb.AppendLine("        // TODO: register your application services and root type here.");
+        sb.AppendLine("        return services.BuildServiceProvider();");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        File.WriteAllText(Path.Combine(outDir, "CompositionRoot.cs"), sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+    }
+
+    /// <summary>Ensures the entry-point project references Microsoft.Extensions.DependencyInjection (needed for
+    /// ServiceCollection/BuildServiceProvider in the generated Composition Root). Idempotent.</summary>
+    private static void EnsureDependencyInjectionPackage(string outDir, string outName)
+    {
+        var path = Path.Combine(outDir, outName + ".csproj");
+        if (!File.Exists(path)) return;
+        var text = File.ReadAllText(path);
+        // Distinguish from the ".Abstractions" package (which is a substring of the full package name).
+        if (text.Contains("Include=\"Microsoft.Extensions.DependencyInjection\"", StringComparison.OrdinalIgnoreCase)) return;
+        var block = "  <ItemGroup>" + Environment.NewLine +
+                    "    <PackageReference Include=\"Microsoft.Extensions.DependencyInjection\" Version=\"8.0.1\" />" + Environment.NewLine +
+                    "  </ItemGroup>" + Environment.NewLine + Environment.NewLine;
+        var idx = text.LastIndexOf("</Project>", StringComparison.Ordinal);
+        text = idx >= 0 ? text[..idx] + block + text[idx..] : text + Environment.NewLine + block;
+        File.WriteAllText(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>Best-effort: inserts a call to the generated CompositionRoot.Build() at the start of the entry
+    /// point (classic static Main or top-level statements) so the DI wiring is exercised. Returns false if the
+    /// entry point could not be located/edited safely (e.g. a WPF app whose Main is auto-generated).</summary>
+    private bool TryInvokeCompositionRoot(string outDir, string nsName)
+    {
+        foreach (var file in Directory.EnumerateFiles(outDir, "*.cs", SearchOption.AllDirectories))
+        {
+            var name = Path.GetFileName(file);
+            if (name.Equals("CompositionRoot.cs", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("SeamRegistration.cs", StringComparison.OrdinalIgnoreCase)) continue;
+            string content;
+            try { content = File.ReadAllText(file); } catch { continue; }
+            SyntaxNode root;
+            try { root = CSharpSyntaxTree.ParseText(content).GetRoot(); } catch { continue; }
+
+            var call = $"_ = global::{nsName}.CompositionRoot.Build();";
+            // Classic static Main with a block body: insert as the first statement.
+            var main = root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .FirstOrDefault(m => m.Identifier.Text == "Main"
+                                  && m.Modifiers.Any(mod => mod.IsKind(SyntaxKind.StaticKeyword)) && m.Body is not null);
+            if (main is not null)
+            {
+                var stmt = SyntaxFactory.ParseStatement(call + Environment.NewLine);
+                var newBody = main.Body!.WithStatements(main.Body.Statements.Insert(0, stmt));
+                var newRoot = root.ReplaceNode(main.Body, newBody);
+                File.WriteAllText(file, newRoot.ToFullString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+                return true;
+            }
+            // Top-level statements: insert before the first global statement.
+            if (root is CompilationUnitSyntax cu && cu.Members.OfType<GlobalStatementSyntax>().FirstOrDefault() is { } firstGlobal)
+            {
+                var stmt = SyntaxFactory.GlobalStatement(SyntaxFactory.ParseStatement(call + Environment.NewLine));
+                var newMembers = cu.Members.Insert(cu.Members.IndexOf(firstGlobal), stmt);
+                File.WriteAllText(file, cu.WithMembers(newMembers).ToFullString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>Escribe ficheros .cs generados (p. ej. interfaces de seam) directamente en el proyecto.</summary>
@@ -633,13 +853,35 @@ public sealed class SolutionRewriter
                 lines.Add($"<PackageReference Include=\"{repl}\"{ver} />");
                 present.Add(repl);
             }
+            else if (e is { Status: LibraryStatus.Revisar } || IsWindowsOnlyPackage(line))
+            {
+                // Windows-only package with no drop-in: the code that used it moved to .Windows (core stays
+                // 100% portable), so the portable project drops the reference. It remains on the Windows side.
+                continue;
+            }
             else { lines.Add(line); if (inc.Length > 0) present.Add(inc); }
         }
 
-        // Add compile-enabling packages for the non-GUI Windows categories present in the portable files.
+        // Ensure a managed, cross-platform database driver for Database findings that stay portable in .Core
+        // (only if the project doesn't already reference one). Pick the provider from the finding symbols.
         var portableRel = portableFiles.Select(f => f.Rel).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dbFindings = info.Findings.Where(f => portableRel.Contains(f.File)
+            && string.Equals(f.Categoria, "Database", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (dbFindings.Count > 0)
+        {
+            bool usesOracle = dbFindings.Any(f => f.Symbol.Contains("Oracle", StringComparison.OrdinalIgnoreCase));
+            bool usesSql = dbFindings.Any(f => f.Symbol.Contains("Sql", StringComparison.OrdinalIgnoreCase));
+            if (usesOracle && !present.Any(p => p.Contains("Oracle.ManagedDataAccess", StringComparison.OrdinalIgnoreCase)))
+            { lines.Add("<PackageReference Include=\"Oracle.ManagedDataAccess.Core\" Version=\"23.5.1\" />"); present.Add("Oracle.ManagedDataAccess.Core"); }
+            if (usesSql && !present.Any(p => p.Contains("Microsoft.Data.SqlClient", StringComparison.OrdinalIgnoreCase)))
+            { lines.Add("<PackageReference Include=\"Microsoft.Data.SqlClient\" Version=\"5.2.2\" />"); present.Add("Microsoft.Data.SqlClient"); }
+        }
+
+        // Safety net: compile-enabling packages for any non-GUI Windows category that (unexpectedly) remains in
+        // a portable file. With the "core stays 100% portable" policy these files now move to .Windows, so this
+        // rarely triggers, but it keeps the core compiling if a residual finding slips through.
         var categories = info.Findings
-            .Where(f => portableRel.Contains(f.File) && !IsGuiCategory(f.Categoria))
+            .Where(f => portableRel.Contains(f.File) && !IsGuiCategory(f.Categoria) && !IsPortableViaSwap(f.Categoria))
             .Select(f => f.Categoria).Distinct(StringComparer.OrdinalIgnoreCase);
         foreach (var cat in categories)
         {
@@ -663,6 +905,10 @@ public sealed class SolutionRewriter
             var e = LibraryReplacements.Lookup(IncludeNameOf(line));
             if (e is { NamespaceFrom: { } from, NamespaceTo: { } to }) map[from] = to;
         }
+        // Database code that stays portable: swap the Windows-only / legacy provider namespace for the managed
+        // one (harmless when absent: the regex only fires if the namespace actually appears in the file).
+        if (info.Findings.Any(f => string.Equals(f.Categoria, "Database", StringComparison.OrdinalIgnoreCase)))
+            foreach (var (from, to) in DatabaseNamespaceSwaps) map[from] = to;
         return map;
     }
 
@@ -888,8 +1134,12 @@ public sealed class SolutionRewriter
         sb.AppendLine();
         sb.AppendLine("- **Portable**: no tenía dependencias de Windows → quedó en un único proyecto `net8.0` (los ya `net8.0`,");
         sb.AppendLine("  p. ej. los `*Multi`, se copiaron sin cambios; los `net8.0-windows` sin dependencias reales se retargetearon).");
-        sb.AppendLine("- **Separable**: se dividió en `X.Core` (`net8.0`, portable) + `X.Windows` (`net8.0-windows`), repartiendo los");
-        sb.AppendLine("  ficheros por sus dependencias de Windows (namespaces conservados).");
+        sb.AppendLine("- **Separable**: se dividió en `X.Core` (`net8.0`, portable) + `X.Windows` (`net8.0-windows`). El **núcleo queda");
+        sb.AppendLine("  100% portable**: solo se quedan en `.Core` las clases sin dependencia de Windows o cuya dependencia se resuelve");
+        sb.AppendLine("  con un cambio de librería (p. ej. driver de BD gestionado). Toda clase con una dependencia de Windows sin");
+        sb.AppendLine("  reemplazo directo (Registro, EventLog, WMI, DPAPI, P/Invoke, COM…) se mueve a `.Windows`.");
+        sb.AppendLine("- **Namespaces rebasados**: los ficheros de `X.Core` declaran `namespace X.Core[.Sub]` y los de `X.Windows`");
+        sb.AppendLine("  `namespace X.Windows[.Sub]`; se actualizaron todas las referencias (`using` y nombres cualificados) de la solución.");
         sb.AppendLine("- **SoloWindows**: todo el proyecto dependía de Windows (UI/punto de entrada) → quedó en `net8.0-windows`.");
         sb.AppendLine();
 
@@ -913,12 +1163,10 @@ public sealed class SolutionRewriter
             foreach (var s in seams)
                 sb.AppendLine($"| `{s.Interface}` | `{s.Concrete}` | {s.Project} |");
             sb.AppendLine();
-            sb.AppendLine("Lo ÚNICO que queda por hacer es **invocar** el registro generado desde el arranque de tu app Windows:");
-            sb.AppendLine();
-            sb.AppendLine("```csharp");
-            foreach (var proj in seams.Select(s => s.Project).Distinct())
-                sb.AppendLine($"services.AddWindowsSeams();   // de {proj}.Windows");
-            sb.AppendLine("```");
+            sb.AppendLine("**El cableado por DI ya está hecho en el código generado**: en el proyecto de arranque se generó un");
+            sb.AppendLine("`CompositionRoot.Build()` que crea el `ServiceCollection`, llama a `AddWindowsSeams()` de cada proyecto");
+            sb.AppendLine("`.Windows` con seams y devuelve el proveedor; además se intentó invocarlo desde el punto de entrada");
+            sb.AppendLine("(si no fue posible —p. ej. WPF con `Main` autogenerado— hay un aviso indicando dónde llamarlo).");
             sb.AppendLine();
             sb.AppendLine("La implementación para otros SO (Linux…) se añade creando otra clase que implemente la misma interfaz");
             sb.AppendLine("y registrándola en su lugar; **el núcleo no cambia** (queda preparado para otro equipo).");
@@ -947,7 +1195,8 @@ public sealed class SolutionRewriter
         sb.AppendLine("## Verificación sugerida");
         sb.AppendLine($"1. Abre `{solutionName}.sln` y **compila**: los núcleos `net8.0` compilan en cualquier SO; el código");
         sb.AppendLine("   Windows (WPF/Registro/P-Invoke…) compila en `net8.0-windows`.");
-        sb.AppendLine("2. Invoca `AddWindowsSeams()` en el Composition Root (arranque) de la app Windows (ver arriba).");
+        sb.AppendLine("2. El `CompositionRoot.Build()` (AddWindowsSeams) ya está generado y cableado en el arranque; complétalo");
+        sb.AppendLine("   registrando tus servicios y el tipo raíz de la app.");
         sb.AppendLine("3. Añade un CI multiplataforma (matriz Windows + Linux) que compile los núcleos portables.");
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
     }
@@ -1239,15 +1488,15 @@ public sealed class SolutionRewriter
                 all.Add((f.Abs, f.Rel, info));
 
         var winTypes = new HashSet<string>(StringComparer.Ordinal);
-        // Seed: ONLY the GUI signals (UI findings + WPF/WinForms base types). Non-GUI Windows APIs
-        // (Registry, EventLog, P/Invoke, crypto...) no longer send a file to the Windows side: they stay
-        // portable (library swap + compile-enabling package + [PORTAR] mark).
+        // Seed: files that are Windows-bound (GUI findings, WPF/WinForms base types, or a non-GUI Windows API
+        // WITHOUT a clean library swap: Registry, EventLog, WMI, DPAPI, P/Invoke...). A file whose only
+        // Windows finding is a clean library swap (Database -> managed driver) stays portable.
         foreach (var (abs, rel, info) in all)
         {
             var ft = FileTypesOf(abs);
-            if (info.GuiFindingFiles.Contains(rel) || ft.DerivesWinBase) winTypes.UnionWith(ft.Declared);
+            if (info.WinDependentFiles.Contains(rel) || ft.DerivesWinBase) winTypes.UnionWith(ft.Declared);
         }
-        // Propagate to a fixpoint: a type that (transitively) uses a GUI type is also GUI.
+        // Propagate to a fixpoint: a type that (transitively) uses a Windows type is also Windows.
         bool changed = true; int guard = 0;
         while (changed && guard++ < 100)
         {
@@ -1255,7 +1504,7 @@ public sealed class SolutionRewriter
             foreach (var (abs, rel, info) in all)
             {
                 var ft = FileTypesOf(abs);
-                bool win = info.GuiFindingFiles.Contains(rel) || ft.DerivesWinBase
+                bool win = info.WinDependentFiles.Contains(rel) || ft.DerivesWinBase
                            || ft.Declared.Overlaps(winTypes) || ft.Referenced.Overlaps(winTypes);
                 if (win)
                     foreach (var t in ft.Declared)
@@ -1265,12 +1514,13 @@ public sealed class SolutionRewriter
         return winTypes;
     }
 
-    /// <summary>True if the file must go to the Windows side: it is GUI (WPF/WinForms) — a UI finding, a
-    /// .xaml.cs code-behind, the entry point of a GUI app, derives from a WPF/WinForms base type, or
-    /// declares/uses (transitively) a GUI type. Non-GUI Windows APIs stay portable.</summary>
+    /// <summary>True if the file must go to the Windows side: it is Windows-bound (a GUI finding, or a
+    /// non-GUI Windows API with no clean library swap), a .xaml.cs code-behind, the entry point of a GUI app,
+    /// derives from a WPF/WinForms base type, or declares/uses (transitively) a Windows type. Only files whose
+    /// Windows dependency is a clean library swap (Database -> managed driver) stay portable in .Core.</summary>
     private bool FileTouchesWindows(string abs, string rel, ProjInfo info, HashSet<string> winTypes)
     {
-        if (info.GuiFindingFiles.Contains(rel)) return true;
+        if (info.WinDependentFiles.Contains(rel)) return true;
         if (rel.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)) return true;
         if (IsEntryPoint(abs) && (info.UseWpf || info.UseWinForms)) return true; // only a GUI app's entry point
         var ft = FileTypesOf(abs);
@@ -1280,6 +1530,23 @@ public sealed class SolutionRewriter
     /// <summary>True if a source-finding category is a GUI (graphical interface) dependency (WPF/WinForms).</summary>
     private static bool IsGuiCategory(string categoria) =>
         categoria.Equals("UI", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True if a Windows finding of this category can be made portable IN PLACE with a clean library
+    /// swap (package + namespace), so the file can stay in the portable .Core. Only the managed database
+    /// drivers qualify (Oracle.ManagedDataAccess.Core, Microsoft.Data.SqlClient are cross-platform). Every
+    /// other Windows API (Registry, EventLog, WMI, DPAPI, P/Invoke, COM...) has no drop-in and moves to
+    /// .Windows so the core stays 100% portable.</summary>
+    private static bool IsPortableViaSwap(string categoria) =>
+        categoria.Equals("Database", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Database namespace swaps applied to portable files so the managed, cross-platform driver is
+    /// used instead of the Windows-only / legacy provider (source-level, independent of the package reference).</summary>
+    private static readonly (string From, string To)[] DatabaseNamespaceSwaps =
+    {
+        ("System.Data.OracleClient", "Oracle.ManagedDataAccess.Client"),
+        ("Oracle.DataAccess.Client", "Oracle.ManagedDataAccess.Client"),
+        ("System.Data.SqlClient", "Microsoft.Data.SqlClient"),
+    };
 
     private static void RecreateDir(string dir)
     {
