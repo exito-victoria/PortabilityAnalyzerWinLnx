@@ -22,6 +22,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         AppendEstimationNote(sb);
 
         AppendBuildOrderSection(sb, report);
+        AppendReferencedLibrariesSection(sb, report);
         AppendBucketSummary(sb, report.CostByBucket);
         AppendArchitectureSection(sb, report);
         AppendSplitSection(sb, report);
@@ -275,6 +276,33 @@ public sealed class MarkdownReportExporter : IReportExporter
             sb.AppendLine($"> ⚠️ **Ciclo de referencias detectado** entre: {Cell(string.Join(", ", bo.CycleProjects))}. No existe un orden lineal para esos proyectos; hay que romper el ciclo (extraer un proyecto común o invertir una dependencia).");
             sb.AppendLine();
         }
+    }
+
+    /// <summary>Referenced libraries and their cross-platform equivalent / replacement.</summary>
+    private static void AppendReferencedLibrariesSection(StringBuilder sb, AnalysisReport report)
+    {
+        var libs = report.ReferencedLibraries;
+        if (libs.Count == 0) return;
+
+        sb.AppendLine("## Librerías referenciadas y equivalente multiplataforma");
+        sb.AppendLine();
+        sb.AppendLine("> Paquetes NuGet referenciados en la solución/proyecto. **Estado**: *Multiplataforma* (sin cambios), " +
+                      "*Reemplazar* (usar el paquete indicado) o *Revisar* (sin reemplazo directo: reescritura manual con la guía).");
+        sb.AppendLine();
+        sb.AppendLine("| Paquete | Versión | Estado | Reemplazo multiplataforma | Nota |");
+        sb.AppendLine("|---------|---------|--------|---------------------------|------|");
+        foreach (var l in libs.OrderBy(l => l.Status).ThenBy(l => l.Package, StringComparer.OrdinalIgnoreCase))
+        {
+            var estado = l.Status switch
+            {
+                LibraryStatus.Multiplataforma => "Multiplataforma",
+                LibraryStatus.Reemplazar => "Reemplazar",
+                _ => "Revisar"
+            };
+            var repl = l.Replacement is null ? "—" : (l.ReplacementVersion is null ? l.Replacement : $"{l.Replacement} {l.ReplacementVersion}");
+            sb.AppendLine($"| {Cell(l.Package)} | {Cell(l.Version ?? "—")} | {estado} | {Cell(repl)} | {Cell(l.NotaEs)} |");
+        }
+        sb.AppendLine();
     }
 
     private static void AppendThirdPartySection(StringBuilder sb, AnalysisReport report)

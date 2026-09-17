@@ -250,7 +250,10 @@ internal static class Program
                     : Path.GetFileNameWithoutExtension(options.OutputPath),
                 ProjectNames = ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)
                     ? new ProjectDiscovery().GetProjects(options.InputPath).Select(p => p.Name).ToList()
-                    : new List<string>()
+                    : new List<string>(),
+                ReferencedLibraries = ProjectDiscovery.Handles(options.InputPath) && File.Exists(options.InputPath)
+                    ? CollectReferencedLibraries(new ProjectDiscovery().GetProjects(options.InputPath))
+                    : new List<ReferencedLibrary>()
             };
 
             // Una sola ejecucion puede generar varios informes (p. ej. Word + Markdown). Con un unico
@@ -324,5 +327,36 @@ internal static class Program
         var name = Path.GetFileNameWithoutExtension(path);
         var ext = Path.GetExtension(path);
         return Path.Combine(dir, name + suffix + ext);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex PackageRefRx = new(
+        "<PackageReference\\s+[^>]*?Include\\s*=\\s*\"([^\"]+)\"(?:[^>]*?Version\\s*=\\s*\"([^\"]+)\")?",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>Collects the distinct NuGet PackageReferences across all projects and classifies each one
+    /// against the curated cross-platform catalog (already cross-platform / replace with X / review).</summary>
+    private static IReadOnlyList<ReferencedLibrary> CollectReferencedLibraries(IReadOnlyList<(string Name, string Dir)> projects)
+    {
+        // package name -> set of versions seen across projects (a package may appear with several versions).
+        var versions = new Dictionary<string, SortedSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, dir) in projects)
+        {
+            var csproj = Directory.Exists(dir) ? Directory.GetFiles(dir, "*.csproj").FirstOrDefault() : null;
+            if (csproj is null) continue;
+            string text;
+            try { text = File.ReadAllText(csproj); } catch { continue; }
+            foreach (System.Text.RegularExpressions.Match m in PackageRefRx.Matches(text))
+            {
+                var pkg = m.Groups[1].Value.Trim();
+                if (pkg.Length == 0) continue;
+                if (!versions.TryGetValue(pkg, out var set)) { set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase); versions[pkg] = set; }
+                if (m.Groups[2].Success && m.Groups[2].Value.Trim().Length > 0) set.Add(m.Groups[2].Value.Trim());
+            }
+        }
+
+        return versions
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kv => LibraryReplacements.Classify(kv.Key, kv.Value.Count > 0 ? string.Join(", ", kv.Value) : null))
+            .ToList();
     }
 }
