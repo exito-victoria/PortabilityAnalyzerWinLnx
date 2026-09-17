@@ -67,6 +67,7 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
 
         AppendBuildOrderSection(b, report);
+        AppendReferencedLibrariesSection(b, report);
         AppendBucketSummary(b, report.CostByBucket);
         AppendArchitectureSection(b, report);
         AppendSplitSection(b, report);
@@ -349,6 +350,40 @@ public sealed class WordReportExporter : IReportExporter
 
     /// <summary>Analisis en profundidad de los ensamblados de terceros (sin fuentes).</summary>
     /// <summary>Orden correcto de compilacion de los proyectos (topologia de ProjectReference).</summary>
+    /// <summary>Referenced libraries and their cross-platform equivalent / replacement.</summary>
+    private void AppendReferencedLibrariesSection(Body b, AnalysisReport report)
+    {
+        var libs = report.ReferencedLibraries;
+        if (libs.Count == 0) return;
+
+        b.Append(Para(T("Librerías referenciadas y equivalente multiplataforma", "Referenced libraries and cross-platform equivalent"), bold: true, sizeHalfPt: 28));
+        b.Append(Para(T(
+            "Paquetes NuGet referenciados en la solución/proyecto. Estado: Multiplataforma (sin cambios), Reemplazar (usar el paquete indicado) o Revisar (sin reemplazo directo: reescritura manual con la guía).",
+            "NuGet packages referenced by the solution/project. Status: Cross-platform (no change), Replace (use the given package) or Review (no drop-in replacement: manual rewrite following the guidance).")));
+
+        string Estado(LibraryStatus s) => s switch
+        {
+            LibraryStatus.Multiplataforma => T("Multiplataforma", "Cross-platform"),
+            LibraryStatus.Reemplazar => T("Reemplazar", "Replace"),
+            _ => T("Revisar", "Review")
+        };
+        var rows = libs
+            .OrderBy(l => l.Status).ThenBy(l => l.Package, StringComparer.OrdinalIgnoreCase)
+            .Select(l => new[]
+            {
+                l.Package,
+                l.Version ?? "—",
+                Estado(l.Status),
+                l.Replacement is null ? "—" : (l.ReplacementVersion is null ? l.Replacement : $"{l.Replacement} {l.ReplacementVersion}"),
+                T(l.NotaEs, l.NotaEn)
+            });
+        b.Append(BuildTable(
+            new[] { T("Paquete", "Package"), T("Versión", "Version"), T("Estado", "Status"), T("Reemplazo multiplataforma", "Cross-platform replacement"), T("Nota", "Note") },
+            new[] { 2.4, 1.0, 1.1, 2.4, 4.1 },
+            rows));
+        b.Append(Para(string.Empty));
+    }
+
     private void AppendBuildOrderSection(Body b, AnalysisReport report)
     {
         var bo = report.BuildOrder;

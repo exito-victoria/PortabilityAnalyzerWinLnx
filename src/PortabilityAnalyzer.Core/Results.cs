@@ -82,4 +82,8 @@ public sealed record AnalysisReport
     /// <summary>Nombres de los proyectos propios (first-party) de la solucion. Sirve para distinguir en los
     /// informes entre PROYECTO propio y DLL de terceros.</summary>
     public IReadOnlyList<string> ProjectNames { get; init; } = new List<string>();
+
+    /// <summary>Referenced NuGet libraries across the solution/project with their cross-platform status
+    /// (already cross-platform / replace with X / review). Drives the "referenced libraries" report section.</summary>
+    public IReadOnlyList<ReferencedLibrary> ReferencedLibraries { get; init; } = new List<ReferencedLibrary>();
 }
