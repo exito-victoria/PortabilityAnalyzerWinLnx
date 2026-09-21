@@ -530,8 +530,8 @@ public sealed class ProjectSplitter
         {
             sb.AppendLine($"        public {m.ReturnType} {m.Name}{m.ParamList}");
             sb.AppendLine("        {");
-            sb.AppendLine($"            // TODO: mover aqui la implementacion Windows de {m.Name}.");
-            sb.AppendLine($"            throw new System.PlatformNotSupportedException(\"Implementar {m.Name} para Windows; dejar el hueco no-Windows para otro equipo.\");");
+            sb.AppendLine($"            // TODO: implementacion multiplataforma de {m.Name} con la API gestionada del BCL o una libreria/NuGet portable.");
+            sb.AppendLine($"            throw new System.PlatformNotSupportedException(\"Implementar {m.Name} de forma multiplataforma (libreria/BCL portable), transparente al SO.\");");
             sb.AppendLine("        }");
         }
         sb.AppendLine("    }");
@@ -808,7 +808,7 @@ public sealed class ProjectSplitter
             sb.AppendLine("   ```");
             sb.AppendLine($"   (Interfaces en `{seamMultiNs}`; implementaciones en `{seamWinNs}`.)");
             sb.AppendLine($"4. **En el núcleo `{multiName}`**, sustituye los usos directos de la API de Windows por la interfaz correspondiente (ver \"Cambios por categoría\").");
-            sb.AppendLine("5. **Implementación no-Windows**: la interfaz de cada seam queda lista; su implementación para otros SO se deja preparada para otro equipo.");
+            sb.AppendLine("5. **Implementación multiplataforma**: implementa cada seam con la librería/NuGet portable o la API gestionada del BCL, en el propio código (transparente al SO); no se deja nada para otro equipo. Los seams son solo el punto de conexión.");
         }
         else
         {
@@ -856,7 +856,7 @@ public sealed class ProjectSplitter
                 sb.AppendLine("   ```");
                 sb.AppendLine();
                 sb.AppendLine($"3. **Registra** la implementación por DI en el arranque: `services.AddSingleton<I{mc.ClassName}Native, Windows{mc.ClassName}Native>();`.");
-                sb.AppendLine($"4. La implementación **no-Windows** de `I{mc.ClassName}Native` queda preparada para otro equipo (otro `I{mc.ClassName}Native` para Linux u otros SO).");
+                sb.AppendLine($"4. **Implementa** `I{mc.ClassName}Native` de forma **multiplataforma** (API gestionada del BCL o librería/NuGet portable), en el propio código y transparente al SO; no se deja nada para otro equipo.");
                 if (mc.Methods.Any(m => m.IsStatic))
                     sb.AppendLine($"> Nota: algún método Windows de `{mc.ClassName}` es **estático**; conviértelo a instancia o expón un método de instancia para poder aislarlo tras la interfaz.");
                 sb.AppendLine();
@@ -899,7 +899,7 @@ public sealed class ProjectSplitter
         sb.AppendLine("#if WINDOWS");
         sb.AppendLine("    // solo Windows");
         sb.AppendLine("#else");
-        sb.AppendLine("    // no-Windows (a cargo de otro equipo)");
+        sb.AppendLine("    // multiplataforma (librería/NuGet o API gestionada del BCL, implementada aquí)");
         sb.AppendLine("#endif");
         sb.AppendLine("```");
         sb.AppendLine();
@@ -1050,7 +1050,7 @@ public sealed class ProjectSplitter
         sb.AppendLine("#if WINDOWS");
         sb.AppendLine("            return \"codigo especifico de Windows (solo se compila en net8.0-windows)\";");
         sb.AppendLine("#else");
-        sb.AppendLine("            return \"implementacion no-Windows (a cargo de otro equipo)\";");
+        sb.AppendLine("            return \"implementacion multiplataforma (libreria/BCL portable, implementada aqui)\";");
         sb.AppendLine("#endif");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
