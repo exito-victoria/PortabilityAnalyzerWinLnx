@@ -96,19 +96,19 @@ public static class Loc
     /// SourceCodeAnalyzer.Fix; en español se usa el texto ya calculado del hallazgo).</summary>
     public static string FixEn(string categoria) => categoria switch
     {
-        "UI" => "The UI is not portable: move the logic/ViewModels to the portable core; keep the WPF UI on Windows and leave the non-Windows UI for another team.",
+        "UI" => "The GUI (WPF/WinForms) is the ONLY exception: it is not migrated. Move the logic/ViewModels to the portable core (net8.0); on Linux only those classes and methods are built, not the graphical layer. The WPF UI stays in the Windows project.",
         "Database" => "Migrate to Oracle.ManagedDataAccess.Client (the .Core package, cross-platform) and adapt the connection string.",
         "Registry" => "Externalize configuration (appsettings.json / IConfiguration); if it must stay on Windows, isolate it behind an ISettingsStore interface per OS.",
-        "Identity" => "Replace Windows identity with a cross-platform scheme (Kerberos/GSSAPI, tokens, LDAP) behind an IUserIdentity interface.",
+        "Identity" => "Cross-platform with a library: Environment.UserName for the local user; System.DirectoryServices.Protocols or Novell.Directory.Ldap (cross-platform LDAP) for directory. Encapsulate behind IUserIdentity with a cross-platform implementation.",
         "Threading" => "In the core, replace UI synchronization with async/await; STAThread/Dispatcher only at the Windows UI startup.",
-        "Cryptography" => "Use the cross-platform factories (RSA.Create/Aes.Create); DPAPI does not exist outside Windows (re-encrypt secrets).",
-        "WMI" => "Isolate WMI behind an interface; part of the information is already available via RuntimeInformation (portable).",
+        "Cryptography" => "Cross-platform with a library/BCL, transparent to the OS: CNG/CSP -> the BCL factories RSA.Create()/ECDsa.Create()/Aes.Create(); DPAPI (ProtectedData) -> ASP.NET Core Data Protection (Microsoft.AspNetCore.DataProtection) via a portable ProtectedData shim with the same API. The rewriter applies both changes.",
+        "WMI" => "Cross-platform with a library: RuntimeInformation (OS/architecture) and, for hardware/inventory, a cross-platform library (e.g. Hardware.Info). Encapsulate behind an interface with a cross-platform implementation.",
         "COM" => "COM does not exist outside Windows: abstract the service behind a portable interface or remove the dependency.",
         "EventLog" => "Move logging to a portable framework (Serilog / Microsoft.Extensions.Logging) writing to console/file.",
         "PerformanceCounter" => "Migrate to EventCounters / System.Diagnostics.Metrics (portable).",
-        "ServiceProcess" => "Use Microsoft.Extensions.Hosting; the non-Windows service integration is left for another team.",
+        "ServiceProcess" => "Use Microsoft.Extensions.Hosting (cross-platform host) + Microsoft.Extensions.Hosting.Systemd (Linux) and Microsoft.Extensions.Hosting.WindowsServices (Windows): both cross-platform packages cover running as a service transparently.",
         "PlatformAttribute" => "API marked Windows-only: find a portable equivalent or guard it with OperatingSystem.IsWindows().",
-        "PInvoke" => "Replace with the managed equivalent or isolate the call behind an interface (P/Invoke only on Windows; non-Windows implementation as a seam).",
+        "PInvoke" => "Replace with the managed BCL equivalent (cross-platform); if none exists, use a cross-platform library/NuGet that covers it. Avoid P/Invoke to Windows DLLs.",
         _ => "Review the usage: replace with a portable equivalent or guard by OS (OperatingSystem.IsWindows())."
     };
 }

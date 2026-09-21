@@ -104,15 +104,15 @@ public static class ArchitectureRecommendation
                 $"Sustituir cada dependencia no portable por el equivalente multiplataforma sugerido (con el porqué; el detalle y los pasos están en 'Alternativa portable / multiplataforma' y 'Pasos de remediación', y hay ejemplos de código en el apéndice): {string.Join(" | ", replacements)}.",
                 $"Replace each non-portable dependency with the suggested cross-platform equivalent (with the why; details and steps are in 'Portable / cross-platform alternative' and 'Remediation steps', and there are code examples in the appendix): {string.Join(" | ", replacements)}."));
         steps.Add(Loc.T(lang,
-            $"Implementar en {baseName}.Platform.Windows solo la parte obligatoriamente Windows de cada abstracción; alternativamente, aislarla en el propio código con OperatingSystem.IsWindows() / #if.",
-            $"In {baseName}.Platform.Windows implement only the strictly-Windows part of each abstraction; alternatively, isolate it in the code itself with OperatingSystem.IsWindows() / #if."));
+            "Implementar la alternativa multiplataforma DENTRO del código (con la librería/NuGet indicado), de forma transparente al SO: la misma clase funciona en Windows y Linux. Solo si no hubiera librería, aislar con OperatingSystem.IsWindows() / #if.",
+            "Implement the cross-platform alternative INSIDE the code (with the indicated library/NuGet), transparently to the OS: the same class runs on Windows and Linux. Only if no library exists, isolate with OperatingSystem.IsWindows() / #if."));
         steps.Add(Loc.T(lang,
-            "Dejar preparado el seam: la implementación NO-Windows de las abstracciones queda pendiente y a cargo de otro equipo (este análisis no la desarrolla ni prescribe la plataforma destino).",
-            "Leave the seam ready: the non-Windows implementation of the abstractions is pending and up to another team (this analysis neither develops it nor prescribes the target platform)."));
+            "No se deja nada 'para otro equipo': cada dependencia de Windows se resuelve con una librería/plugin multiplataforma implementado en el propio código (excepto la GUI WPF, que no se migra).",
+            "Nothing is left 'for another team': each Windows dependency is resolved with a cross-platform library/plugin implemented in the code itself (except the WPF GUI, which is not migrated)."));
         if (hasUi)
             steps.Add(Loc.T(lang,
-                $"Mantener la UI WPF en {baseName}.App.Windows y trasladar los ViewModels/lógica al núcleo portable para reutilizarlos cuando otro equipo aporte la UI no-Windows.",
-                $"Keep the WPF UI in {baseName}.App.Windows and move the ViewModels/logic to the portable core to reuse them when another team provides the non-Windows UI."));
+                $"GUI WPF (única excepción): mantenerla en {baseName}.App.Windows y trasladar los ViewModels/lógica al núcleo portable. En Linux se construyen solo esas clases y métodos, no la capa gráfica.",
+                $"WPF GUI (the only exception): keep it in {baseName}.App.Windows and move the ViewModels/logic to the portable core. On Linux only those classes and methods are built, not the graphical layer."));
         steps.Add(Loc.T(lang,
             "Configurar pruebas y CI que compilen el núcleo portable de forma multiplataforma (matriz de build).",
             "Set up tests and CI that compile the portable core cross-platform (build matrix)."));
@@ -170,7 +170,7 @@ public static class ArchitectureRecommendation
         if (s.Contains("messaging")) return Loc.T(lang, "MSMQ es de Windows; una cola multiplataforma (RabbitMQ/Service Bus) cumple la misma función.", "MSMQ is Windows-specific; a cross-platform queue (RabbitMQ/Service Bus) serves the same purpose.");
         if (s.Contains("servicemodel")) return Loc.T(lang, "WCF clásico es de Windows; CoreWCF o gRPC/ASP.NET Core son portables.", "classic WCF is Windows-specific; CoreWCF or gRPC/ASP.NET Core are portable.");
         if (s.Contains("directoryservices")) return Loc.T(lang, "la integración nativa con Active Directory es de Windows; un cliente LDAP portable la sustituye.", "native Active Directory integration is Windows-specific; a portable LDAP client replaces it.");
-        if (s.Contains("protecteddata")) return Loc.T(lang, "DPAPI es exclusivo de Windows; se cifra con AES y una clave gestionada externamente.", "DPAPI is Windows-only; encrypt with AES and an externally-managed key.");
+        if (s.Contains("protecteddata")) return Loc.T(lang, "DPAPI es exclusivo de Windows; ASP.NET Core Data Protection (Microsoft.AspNetCore.DataProtection) lo sustituye de forma multiplataforma y transparente al SO.", "DPAPI is Windows-only; ASP.NET Core Data Protection (Microsoft.AspNetCore.DataProtection) replaces it cross-platform and transparently to the OS.");
         return Loc.T(lang, "no es portable a otros sistemas operativos; se sustituye por una alternativa gestionada multiplataforma o se aísla por SO.", "it is not portable to other operating systems; replace it with a managed cross-platform alternative or isolate it per OS.");
     }
 

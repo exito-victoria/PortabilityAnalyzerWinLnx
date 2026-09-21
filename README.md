@@ -1,11 +1,11 @@
 # PortabilityAnalyzer
 
 Herramienta de consola (.NET 8) que analiza estáticamente una solución/proyecto de Windows y
-**estima el impacto y el coste de hacerla multiplataforma en .NET 8**, con enfoque **portable-first**:
-llevar todo lo posible a un **núcleo portable** (`net8.0`) y **aislar únicamente lo que obligatoriamente
-depende de Windows**, dejándolo **preparado para que otro equipo aporte la parte no-Windows**. El
-análisis **no prescribe** la plataforma destino ni implementa la UI de otro SO: separa, estructura y deja
-listo el punto de extensión.
+**estima el impacto y el coste de hacerla multiplataforma en .NET 8**, con enfoque **library-first**:
+hacer todo el código multiplataforma con **librerías/NuGets portables** implementados en el propio código y
+**transparentes al SO** (la misma clase funciona en Windows y Linux), **sin dejar nada para otro equipo**. La
+**única excepción es la GUI WPF/WinForms**, que no se migra: en Linux se construyen solo las clases y métodos
+(la lógica/ViewModels en el núcleo portable), no la capa gráfica.
 
 Detecta dependencias del sistema operativo Windows a nivel de **IL** (Mono.Cecil: P/Invoke, COM,
 referencias a ensamblados solo-Windows, atributos de plataforma) y a nivel de **código fuente** (Roslyn:
@@ -101,7 +101,9 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
 - **General** (Markdown y **Word en español e inglés** — `informe.docx` e `informe_EN.docx`): resumen, **coste por bloque**, **orden de compilación** (con Target Framework),
   **recomendación de arquitectura** con un **ejemplo de migración** real y la definición de «seam»,
   **análisis de terceros**, **terceros no modificables** (restricción + opciones), **librerías referenciadas y su
-  equivalente multiplataforma** (paquete de reemplazo o "revisar"), **impacto por proyecto**
+  equivalente multiplataforma** (reemplazo directo, o **alternativa propuesta** cuando el estado es "revisar";
+  catálogo curado a partir de guías de Microsoft, incluida la seguridad: DPAPI → ASP.NET Core Data Protection,
+  CNG → factorías del BCL), **impacto por proyecto**
   (clases y ficheros afectados), **análisis de código fuente** (dónde y cómo corregir) y un **apéndice de
   equivalencias portables / aislamiento por SO** con fragmentos de código. El Word incluye **Tabla de
   contenido** (con estilos de título) y **repite las cabeceras** de tabla al partir en páginas.

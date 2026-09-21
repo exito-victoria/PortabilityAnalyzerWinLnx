@@ -4,11 +4,10 @@
 public sealed record CodeExample(string Categoria, string Titulo, string Codigo, string Nota);
 
 /// <summary>
-/// Ejemplos de patron PORTABLE-FIRST por categoria de dependencia: usar la API gestionada portable cuando
-/// existe, o AISLAR lo que hoy exige Windows tras una interfaz / compilacion condicional
-/// (<c>OperatingSystem.IsWindows()</c> / <c>#if</c>), dejando el hueco preparado. NO se desarrolla ni
-/// prescribe la implementacion de otra plataforma: eso queda a cargo de otro equipo. Se muestran en el
-/// informe (apendice) solo para las categorias que aparecen.
+/// Ejemplos de patron LIBRARY-FIRST por categoria de dependencia: resolver cada dependencia de Windows con
+/// una libreria/NuGet o API gestionada MULTIPLATAFORMA, implementada en el propio codigo y transparente al
+/// SO (la misma clase funciona en Windows y Linux), sin dejar nada para otro equipo. La unica excepcion es la
+/// GUI WPF, que no se migra. Se muestran en el informe (apendice) solo para las categorias que aparecen.
 /// </summary>
 public static class CodeExamples
 {
@@ -48,28 +47,29 @@ public static class CodeExamples
             #if WINDOWS
                 return (long)GetTickCount64();       // P/Invoke solo se compila en Windows
             #else
-                return Environment.TickCount64;      // rama portable (implementacion no-Windows si hiciera falta: otro equipo)
+                return Environment.TickCount64;      // rama portable (API gestionada del BCL, multiplataforma)
             #endif
             }
             """,
             "El TFM net8.0-windows define WINDOWS; el núcleo portable (net8.0) compila la rama #else."),
 
-        new("Identity", "Identidad de Windows -> abstracción (el «seam»)",
+        new("Identity", "Identidad de Windows -> librería multiplataforma",
             """
             // Solo Windows:
             var nombre = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
 
-            // Portable: abstraer la identidad tras una interfaz (el nucleo depende de IUserIdentity)
+            // Multiplataforma y transparente: Environment.UserName funciona en Windows y Linux.
             public interface IUserIdentity { string Name { get; } }
 
-            // Implementacion Windows (la unica que se desarrolla aqui):
-            public sealed class WindowsUserIdentity : IUserIdentity
+            public sealed class PortableUserIdentity : IUserIdentity
             {
-                public string Name => System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+                public string Name => Environment.UserName;   // mismo código en todos los SO
             }
-            // La implementacion no-Windows de IUserIdentity queda como seam, a cargo de otro equipo.
+            // Para identidad de dominio/Active Directory: System.DirectoryServices.Protocols
+            // (cliente LDAP multiplataforma) o Novell.Directory.Ldap. La implementación se aporta aquí,
+            // no se deja nada para otro equipo.
             """,
-            "La lógica de negocio depende solo de IUserIdentity; Windows aporta su implementación (DI). El «seam» no-Windows se deja preparado."),
+            "La lógica depende solo de IUserIdentity; la implementación multiplataforma (Environment.UserName / LDAP) se aporta en el propio código."),
 
         new("Database", "Oracle: System.Data.OracleClient -> Oracle.ManagedDataAccess.Core",
             """
@@ -86,28 +86,31 @@ public static class CodeExamples
 
         new("UI", "UI (WPF/WinForms) -> núcleo portable + UI Windows aislada",
             """
-            // WPF/WinForms estan atados a Windows. Estructura PORTABLE-FIRST:
-            //   MiApp.Core         (net8.0)          -> logica y ViewModels (portable, sin UI)
-            //   MiApp.App.Windows  (net8.0-windows)  -> WPF (la UI actual)
-            // Regla clave: el nucleo NO debe referenciar PresentationFramework ni System.Windows.Forms,
-            // para que los ViewModels/logica sean reutilizables por cualquier UI futura.
-            // La UI no-Windows NO se desarrolla aqui: queda preparada para que otro equipo la aporte
-            // reutilizando los ViewModels del nucleo.
+            // WPF/WinForms estan atados a Windows y son la UNICA excepcion: NO se migran.
+            //   MiApp.Core         (net8.0)          -> logica y ViewModels (multiplataforma, sin UI)
+            //   MiApp.App.Windows  (net8.0-windows)  -> WPF (la UI actual, solo en Windows)
+            // Regla clave: el nucleo NO referencia PresentationFramework ni System.Windows.Forms.
+            // En Linux se construyen solo esas clases y metodos (el nucleo); la capa grafica no se construye.
             """,
-            "Separar UI de lógica deja el núcleo portable y reutilizable; la UI no-Windows queda como trabajo de otro equipo."),
+            "La GUI WPF es la única excepción: no se migra. La lógica/ViewModels van al núcleo multiplataforma; en Linux solo se construyen las clases y métodos, no la UI."),
 
-        new("Cryptography", "DPAPI -> cifrado gestionado portable",
+        new("Cryptography", "DPAPI y CNG -> librerías multiplataforma (transparente al SO)",
             """
-            // Solo Windows (DPAPI):
+            // Solo Windows (DPAPI): ProtectedData.Protect/Unprotect + DataProtectionScope.
             byte[] prot = ProtectedData.Protect(datos, null, DataProtectionScope.CurrentUser);
 
-            // Portable: AES con clave gestionada externamente (KMS / gestor de secretos)
-            using var aes = Aes.Create();
-            aes.Key = claveDesdeGestorDeSecretos;   // no derivar de DPAPI
+            // Portable y TRANSPARENTE: ASP.NET Core Data Protection (Microsoft.AspNetCore.DataProtection).
+            // El reescritor genera un shim Portability.Security.ProtectedData con la MISMA API, respaldado por
+            // la librería (funciona en Windows/Linux/macOS). El código de arriba NO cambia: solo se añade
+            // 'using Portability.Security;'. Internamente:
+            var provider = DataProtectionProvider.Create(new DirectoryInfo(rutaKeyRing));
+            var protector = provider.CreateProtector("MiApp");
+            byte[] cifrado = protector.Protect(datos);   // clave gestionada por la librería, persistida en disco
 
-            // Tambien: RSA.Create()/ECDsa.Create() en vez de las variantes *Cng/*CryptoServiceProvider.
+            // CNG/CSP solo-Windows -> factorías portables del BCL (misma clase base, implementación por SO):
+            using var rsa = RSA.Create(2048);     // en vez de new RSACng(2048) / new RSACryptoServiceProvider()
             """,
-            "IMPORTANTE: lo ya protegido con DPAPI NO se puede descifrar fuera de Windows; planificar re-cifrado."),
+            "Data Protection sustituye a DPAPI de forma multiplataforma y transparente. CAVEAT: lo YA cifrado con el DPAPI real de Windows debe re-protegerse una vez (leer con DPAPI, reescribir con el shim); lo nuevo es portable."),
 
         new("EventLog", "Visor de eventos -> logging portable",
             """
@@ -120,19 +123,20 @@ public static class CodeExamples
             """,
             "Un único framework de logging portable sustituye al Visor de eventos de Windows."),
 
-        new("WMI", "WMI -> abstracción (el «seam»)",
+        new("WMI", "WMI -> RuntimeInformation + librería multiplataforma",
             """
             // Solo Windows (WMI):
             using System.Management;
             var os = new ManagementObjectSearcher("SELECT * FROM Win32_OperatingSystem");
 
-            // Portable: abstraer la consulta del sistema tras una interfaz
-            public interface ISystemInfo { string OsDescription { get; } }
-            // Parte portable disponible: RuntimeInformation.OSDescription.
-            // Los datos que hoy solo da WMI se aislan tras ISystemInfo; su implementacion no-Windows,
-            // si se necesita, queda como seam a cargo de otro equipo.
+            // Multiplataforma: RuntimeInformation para SO/arquitectura...
+            var desc = System.Runtime.InteropServices.RuntimeInformation.OSDescription;
+            // ...y para hardware/inventario, una librería multiplataforma (p. ej. Hardware.Info, NuGet):
+            var hw = new Hardware.Info.HardwareInfo();
+            hw.RefreshMemoryStatus();
+            // La implementación multiplataforma se aporta aquí; no se deja nada para otro equipo.
             """,
-            "WMI es exclusivo de Windows; se aísla tras una interfaz y parte de la información ya la da RuntimeInformation (portable).")
+            "WMI es exclusivo de Windows; RuntimeInformation + una librería como Hardware.Info cubren la información de forma multiplataforma.")
     };
 
     /// <summary>Titulo, bloque de codigo y nota en INGLES por categoria (traduccion completa del apendice).</summary>
@@ -171,27 +175,27 @@ public static class CodeExamples
             #if WINDOWS
                 return (long)GetTickCount64();       // P/Invoke compiles only on Windows
             #else
-                return Environment.TickCount64;      // portable branch (non-Windows impl if ever needed: another team)
+                return Environment.TickCount64;      // portable branch (managed BCL API, cross-platform)
             #endif
             }
             """,
             "The net8.0-windows TFM defines WINDOWS; the portable core (net8.0) compiles the #else branch."),
-        ["Identity"] = ("Windows identity -> abstraction (the \"seam\")",
+        ["Identity"] = ("Windows identity -> cross-platform library",
             """
             // Windows only:
             var name = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
 
-            // Portable: abstract identity behind an interface (the core depends on IUserIdentity)
+            // Cross-platform and transparent: Environment.UserName works on Windows and Linux.
             public interface IUserIdentity { string Name { get; } }
 
-            // Windows implementation (the only one developed here):
-            public sealed class WindowsUserIdentity : IUserIdentity
+            public sealed class PortableUserIdentity : IUserIdentity
             {
-                public string Name => System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+                public string Name => Environment.UserName;   // same code on every OS
             }
-            // The non-Windows implementation of IUserIdentity is left as a seam, up to another team.
+            // For domain/Active Directory identity: System.DirectoryServices.Protocols (cross-platform LDAP)
+            // or Novell.Directory.Ldap. The implementation is provided here; nothing is left for another team.
             """,
-            "Business logic depends only on IUserIdentity; Windows provides its implementation (DI). The non-Windows seam is left ready."),
+            "Business logic depends only on IUserIdentity; the cross-platform implementation (Environment.UserName / LDAP) is provided in the code itself."),
         ["Database"] = ("Oracle: System.Data.OracleClient -> Oracle.ManagedDataAccess.Core",
             """
             // Before (removed in modern .NET, Windows only):
@@ -206,27 +210,30 @@ public static class CodeExamples
             "Oracle.ManagedDataAccess.Core is 100% managed and portable (no OS dependency)."),
         ["UI"] = ("UI (WPF/WinForms) -> portable core + isolated Windows UI",
             """
-            // WPF/WinForms are tied to Windows. PORTABLE-FIRST structure:
-            //   MyApp.Core         (net8.0)          -> logic and ViewModels (portable, no UI)
-            //   MyApp.App.Windows  (net8.0-windows)  -> WPF (the current UI)
-            // Key rule: the core must NOT reference PresentationFramework or System.Windows.Forms,
-            // so the ViewModels/logic are reusable by any future UI.
-            // The non-Windows UI is NOT developed here: it is left ready for another team to provide,
-            // reusing the core ViewModels.
+            // WPF/WinForms are tied to Windows and are the ONLY exception: they are NOT migrated.
+            //   MyApp.Core         (net8.0)          -> logic and ViewModels (cross-platform, no UI)
+            //   MyApp.App.Windows  (net8.0-windows)  -> WPF (the current UI, Windows only)
+            // Key rule: the core must NOT reference PresentationFramework or System.Windows.Forms.
+            // On Linux only those classes and methods (the core) are built; the graphical layer is not built.
             """,
-            "Separating UI from logic keeps the core portable and reusable; the non-Windows UI is left for another team."),
-        ["Cryptography"] = ("DPAPI -> portable managed encryption",
+            "The WPF GUI is the only exception: it is not migrated. The logic/ViewModels go to the cross-platform core; on Linux only the classes and methods are built, not the UI."),
+        ["Cryptography"] = ("DPAPI and CNG -> cross-platform libraries (OS-transparent)",
             """
-            // Windows only (DPAPI):
+            // Windows only (DPAPI): ProtectedData.Protect/Unprotect + DataProtectionScope.
             byte[] prot = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
 
-            // Portable: AES with an externally managed key (KMS / secrets manager)
-            using var aes = Aes.Create();
-            aes.Key = keyFromSecretsManager;   // do not derive from DPAPI
+            // Portable and TRANSPARENT: ASP.NET Core Data Protection (Microsoft.AspNetCore.DataProtection).
+            // The rewriter generates a Portability.Security.ProtectedData shim with the SAME API, backed by the
+            // library (Windows/Linux/macOS). The code above does NOT change: only 'using Portability.Security;'
+            // is added. Internally:
+            var provider = DataProtectionProvider.Create(new DirectoryInfo(keyRingPath));
+            var protector = provider.CreateProtector("MyApp");
+            byte[] encrypted = protector.Protect(data);   // key managed by the library, persisted on disk
 
-            // Also: RSA.Create()/ECDsa.Create() instead of the *Cng/*CryptoServiceProvider variants.
+            // Windows-only CNG/CSP -> portable BCL factories (same base class, per-OS implementation):
+            using var rsa = RSA.Create(2048);     // instead of new RSACng(2048) / new RSACryptoServiceProvider()
             """,
-            "IMPORTANT: data already protected with DPAPI CANNOT be decrypted outside Windows; plan a re-encryption."),
+            "Data Protection replaces DPAPI cross-platform and transparently. CAVEAT: data ALREADY encrypted with the real Windows DPAPI must be re-protected once (read with DPAPI, write back with the shim); new data is portable."),
         ["EventLog"] = ("Event Viewer -> portable logging",
             """
             // Windows only:
@@ -237,19 +244,20 @@ public static class CodeExamples
             log.LogInformation("msg");
             """,
             "A single portable logging framework replaces the Windows Event Viewer."),
-        ["WMI"] = ("WMI -> abstraction (the \"seam\")",
+        ["WMI"] = ("WMI -> RuntimeInformation + cross-platform library",
             """
             // Windows only (WMI):
             using System.Management;
             var os = new ManagementObjectSearcher("SELECT * FROM Win32_OperatingSystem");
 
-            // Portable: abstract the system query behind an interface
-            public interface ISystemInfo { string OsDescription { get; } }
-            // Portable part available: RuntimeInformation.OSDescription.
-            // The data that today only WMI provides is isolated behind ISystemInfo; its non-Windows
-            // implementation, if needed, is left as a seam up to another team.
+            // Cross-platform: RuntimeInformation for OS/architecture...
+            var desc = System.Runtime.InteropServices.RuntimeInformation.OSDescription;
+            // ...and for hardware/inventory, a cross-platform library (e.g. Hardware.Info, NuGet):
+            var hw = new Hardware.Info.HardwareInfo();
+            hw.RefreshMemoryStatus();
+            // The cross-platform implementation is provided here; nothing is left for another team.
             """,
-            "WMI is Windows-only; it is isolated behind an interface and part of the info is already provided by RuntimeInformation (portable)."),
+            "WMI is Windows-only; RuntimeInformation + a library like Hardware.Info cover the information cross-platform."),
     };
 
     /// <summary>Ejemplos correspondientes a las categorias indicadas, en el idioma solicitado.</summary>

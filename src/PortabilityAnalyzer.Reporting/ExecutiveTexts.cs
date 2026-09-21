@@ -100,8 +100,9 @@ public sealed class ExecTexts
         Scope = n => n == 1 ? "el proyecto analizado" : $"los {n} proyectos/ensamblados analizados",
         SummaryPara1 = scope =>
             $"Este informe resume el trabajo necesario para hacer multiplataforma (portable a .NET 8) {scope}. " +
-            "El enfoque es portable-first: llevar todo lo posible a un núcleo portable y aislar únicamente lo que " +
-            "depende obligatoriamente de Windows, dejándolo preparado para que otro equipo aporte la parte no-Windows.",
+            "El enfoque es library-first: llevar todo el código a librerías/NuGets multiplataforma, de forma transparente " +
+            "al SO (la misma clase funciona en Windows y Linux), sin dejar nada para otro equipo. La única excepción es " +
+            "la GUI WPF, que no se migra: en Linux se construyen solo las clases y métodos, no la capa gráfica.",
         SummaryPara2 = (media, opt, pes, blk) =>
             $"Esfuerzo estimado total: {media} horas-persona como valor más probable (rango {opt}–{pes} h), con {blk} " +
             "hallazgo(s) bloqueante(s) a resolver en nuestros proyectos. Las cifras son una estimación de planificación " +
@@ -166,11 +167,11 @@ public sealed class ExecTexts
         UnknownShort = "desconocido",
 
         HRecommendation = "Recomendación",
-        RecoPara1 = "Adoptar una arquitectura portable-first: un núcleo .NET 8 multiplataforma lo más grande posible, una " +
-                    "capa de interfaces (el «seam») para lo que dependa del sistema operativo, y una única pieza aislada con " +
-                    "lo obligatoriamente Windows. Priorizar la resolución de los puntos bloqueantes y de los proyectos " +
-                    "marcados como obligatorios. La implementación de la plataforma no-Windows queda preparada tras las " +
-                    "interfaces, para que otro equipo la desarrolle.",
+        RecoPara1 = "Adoptar una arquitectura library-first: código .NET 8 multiplataforma resuelto con librerías/NuGets " +
+                    "portables implementados en el propio código, de forma transparente al SO (la misma clase funciona en " +
+                    "Windows y Linux, sin dejar nada para otro equipo). La única excepción es la GUI WPF, que no se migra: en " +
+                    "Linux se construyen solo las clases y métodos, no la capa gráfica. Priorizar la resolución de los puntos " +
+                    "bloqueantes y de los proyectos marcados como obligatorios.",
         RecoPara2 = "Un seam (o punto de unión/corte) no es propiamente una capa física de la aplicación, sino un lugar en " +
                     "el código donde puedes alterar el comportamiento del programa sin modificar el código fuente de ese " +
                     "lugar, el punto de extensión —una interfaz— por el que el núcleo portable llama a una capacidad que " +
@@ -191,8 +192,9 @@ public sealed class ExecTexts
         Scope = n => n == 1 ? "the analyzed project" : $"the {n} analyzed projects/assemblies",
         SummaryPara1 = scope =>
             $"This report summarizes the work required to make {scope} cross-platform (portable to .NET 8). " +
-            "The approach is portable-first: move as much as possible to a portable core and isolate only what strictly " +
-            "depends on Windows, leaving it ready for another team to provide the non-Windows part.",
+            "The approach is library-first: move all code to cross-platform libraries/NuGets, transparently to the OS " +
+            "(the same class runs on Windows and Linux), leaving nothing for another team. The only exception is the WPF " +
+            "GUI, which is not migrated: on Linux only the classes and methods are built, not the graphical layer.",
         SummaryPara2 = (media, opt, pes, blk) =>
             $"Total estimated effort: {media} person-hours as the most likely value (range {opt}–{pes} h), with {blk} " +
             "blocking finding(s) to resolve in our projects. Figures are a planning estimate and should be calibrated with " +
@@ -257,10 +259,11 @@ public sealed class ExecTexts
         UnknownShort = "unknown",
 
         HRecommendation = "Recommendation",
-        RecoPara1 = "Adopt a portable-first architecture: a .NET 8 cross-platform core as large as possible, an interface " +
-                    "layer (the \"seam\") for anything OS-dependent, and a single isolated piece with what strictly requires " +
-                    "Windows. Prioritize resolving the blocking points and the projects marked as mandatory. The non-Windows " +
-                    "platform implementation is left ready behind the interfaces for another team to develop.",
+        RecoPara1 = "Adopt a library-first architecture: cross-platform .NET 8 code resolved with portable libraries/NuGets " +
+                    "implemented in the code itself, transparently to the OS (the same class runs on Windows and Linux, " +
+                    "leaving nothing for another team). The only exception is the WPF GUI, which is not migrated: on Linux only " +
+                    "the classes and methods are built, not the graphical layer. Prioritize resolving the blocking points and " +
+                    "the projects marked as mandatory.",
         RecoPara2 = "A seam is not really a physical layer of the application, but a place in the code where you can alter " +
                     "the program's behavior without modifying the source code at that place: the extension point —an " +
                     "interface— through which the portable core calls an OS-dependent capability without knowing its " +
