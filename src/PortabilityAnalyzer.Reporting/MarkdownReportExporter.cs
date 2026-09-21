@@ -82,7 +82,7 @@ public sealed class MarkdownReportExporter : IReportExporter
 
         sb.AppendLine("## Arquitectura destino recomendada y plan de migración");
         sb.AppendLine();
-        sb.AppendLine($"Objetivo: **núcleo .NET 8 portable** lo más grande posible + **lo obligatoriamente Windows aislado** (Platform.Windows / `#if`), dejando el resto **preparado para otro equipo**. Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
+        sb.AppendLine($"Objetivo: **código .NET 8 multiplataforma** usando **librerías/NuGets portables**, de forma **transparente al SO** (la misma clase funciona en Windows y Linux, sin dejar nada para otro equipo). **Única excepción: la GUI WPF**, que no se migra (en Linux solo se construyen las clases y métodos, no la capa gráfica). Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
         sb.AppendLine();
         sb.AppendLine("> **Qué es un «seam» (costura):** el punto de extensión —una interfaz— por el que el núcleo portable llama a una capacidad que depende del sistema operativo, sin conocer su implementación. Cada plataforma aporta su propia implementación de esa interfaz; así el núcleo se mantiene portable y lo específico de cada SO queda encapsulado y sustituible.");
         sb.AppendLine();

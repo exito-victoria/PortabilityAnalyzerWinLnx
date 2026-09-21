@@ -142,20 +142,20 @@ internal static class DiscoveredRuleMerger
             new[] { "Identificar el algoritmo/tipo usado.", "Sustituir por la factoría multiplataforma equivalente.", "Probar en ambos SO." },
             new[] { "Identify the algorithm/type used.", "Replace with the equivalent cross-platform factory.", "Test on both OSes." }),
         "Identity" => (
-            "Abstraer la identidad tras una interfaz (p. ej. IUserIdentity); la implementación no-Windows queda como seam para otro equipo. REVISAR.",
-            "Abstract identity behind an interface (e.g. IUserIdentity); the non-Windows implementation is left as a seam for another team. REVIEW.",
-            new[] { "Localizar el uso de identidad de Windows.", "Definir una interfaz de identidad y usarla en el núcleo.", "Implementar en Windows; dejar el seam no-Windows." },
-            new[] { "Locate the Windows identity usage.", "Define an identity interface and use it in the core.", "Implement on Windows; leave the non-Windows seam." }),
+            "Identidad multiplataforma: Environment.UserName y, para directorio/AD, System.DirectoryServices.Protocols o Novell.Directory.Ldap (LDAP multiplataforma), tras una interfaz IUserIdentity implementada en el propio código. REVISAR.",
+            "Cross-platform identity: Environment.UserName and, for directory/AD, System.DirectoryServices.Protocols or Novell.Directory.Ldap (cross-platform LDAP), behind an IUserIdentity interface implemented in the code itself. REVIEW.",
+            new[] { "Localizar el uso de identidad de Windows.", "Definir IUserIdentity y usarla en el núcleo.", "Implementar la versión multiplataforma (Environment.UserName / LDAP) en el propio código." },
+            new[] { "Locate the Windows identity usage.", "Define IUserIdentity and use it in the core.", "Implement the cross-platform version (Environment.UserName / LDAP) in the code itself." }),
         "Threading" => (
             "Reemplazar la sincronización con contexto por async/await, IProgress<T> o un SynchronizationContext neutro; el marshalling de UI queda en la capa de presentación. REVISAR.",
             "Replace context synchronization with async/await, IProgress<T> or a neutral SynchronizationContext; UI marshalling stays in the presentation layer. REVIEW.",
             new[] { "Localizar el uso en lógica de negocio.", "Reemplazar por async/await o contexto neutro.", "Probar en ambos SO." },
             new[] { "Locate the usage in business logic.", "Replace with async/await or a neutral context.", "Test on both OSes." }),
         "AssemblyReference" => (
-            "WPF/WinForms atan a Windows: desacoplar la UI y mantener ViewModels/lógica en el núcleo portable; la UI no-Windows queda a cargo de otro equipo. REVISAR.",
-            "WPF/WinForms are tied to Windows: decouple the UI and keep the ViewModels/logic in the portable core; the non-Windows UI is handled by another team. REVIEW.",
-            new[] { "Separar la lógica de la UI hacia el núcleo portable.", "Mantener la UI Windows en el ejecutable Windows.", "Validar en ambos SO." },
-            new[] { "Separate the logic from the UI into the portable core.", "Keep the Windows UI in the Windows executable.", "Validate on both OSes." }),
+            "La GUI WPF/WinForms es la única excepción: no se migra. Desacoplar la lógica/ViewModels al núcleo multiplataforma; en Linux se construyen solo esas clases y métodos, no la capa gráfica. REVISAR.",
+            "The WPF/WinForms GUI is the only exception: it is not migrated. Decouple the logic/ViewModels into the cross-platform core; on Linux only those classes and methods are built, not the graphical layer. REVIEW.",
+            new[] { "Separar la lógica de la UI hacia el núcleo multiplataforma.", "Mantener la UI WPF en el ejecutable Windows.", "Validar que el núcleo compila en ambos SO." },
+            new[] { "Separate the logic from the UI into the cross-platform core.", "Keep the WPF UI in the Windows executable.", "Validate that the core compiles on both OSes." }),
         "ProcessInvocation" => (
             "Preferir una API gestionada equivalente; si hay que ejecutar el proceso, abstraer la ejecución por SO. REVISAR.",
             "Prefer an equivalent managed API; if the process must run, abstract the execution per OS. REVIEW.",

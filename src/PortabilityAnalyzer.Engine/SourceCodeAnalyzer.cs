@@ -242,19 +242,19 @@ public sealed class SourceCodeAnalyzer
 
     private static string Fix(string categoria) => categoria switch
     {
-        "UI" => "La UI no es portable: separar la lógica/ViewModels al núcleo portable; mantener la UI WPF en Windows y dejar la UI no-Windows preparada para otro equipo.",
+        "UI" => "La GUI (WPF/WinForms) es la ÚNICA excepción: no se migra. Mover la lógica/ViewModels al núcleo portable (net8.0); en Linux se construyen solo esas clases y métodos, no la capa gráfica. La UI WPF permanece en el proyecto Windows.",
         "Database" => "Migrar a Oracle.ManagedDataAccess.Client (paquete .Core, portable) y adaptar la cadena de conexión.",
         "Registry" => "Externalizar la configuración (appsettings.json / IConfiguration); si debe seguir en Windows, aislar tras una interfaz ISettingsStore por SO.",
-        "Identity" => "Aislar la identidad tras una interfaz IUserIdentity; implementación Windows aquí, la no-Windows queda como seam para otro equipo.",
+        "Identity" => "Multiplataforma con librería: nombre de usuario con Environment.UserName; para directorio, System.DirectoryServices.Protocols o Novell.Directory.Ldap (LDAP multiplataforma). Encapsular tras IUserIdentity con implementación multiplataforma integrada.",
         "Threading" => "En el núcleo, reemplazar la sincronización con UI por async/await; STAThread/Dispatcher solo en el arranque de la UI Windows.",
-        "Cryptography" => "Usar las factorías portables (RSA.Create/Aes.Create); DPAPI está atado a Windows (re-cifrar los secretos con clave gestionada externamente).",
-        "WMI" => "Aislar la consulta tras una interfaz; parte ya la da RuntimeInformation (portable), el resto queda como seam para otro equipo.",
+        "Cryptography" => "Multiplataforma con librería/BCL, transparente al SO: CNG/CSP (RSACng, RSACryptoServiceProvider, ECDsaCng) -> factorías del BCL RSA.Create()/ECDsa.Create()/Aes.Create(); DPAPI (ProtectedData) -> ASP.NET Core Data Protection (Microsoft.AspNetCore.DataProtection), con un shim ProtectedData portable de la misma API. El reescritor aplica ambos cambios.",
+        "WMI" => "Multiplataforma con librería: RuntimeInformation (SO/arquitectura) y, para hardware/inventario, una librería multiplataforma (p. ej. Hardware.Info). Encapsular tras una interfaz con implementación multiplataforma integrada.",
         "COM" => "COM está atado a Windows: abstraer el servicio tras una interfaz portable o eliminar la dependencia.",
         "EventLog" => "Migrar el logging a un framework portable (Serilog / Microsoft.Extensions.Logging) con salida a consola/fichero.",
         "PerformanceCounter" => "Migrar a EventCounters / System.Diagnostics.Metrics (portable).",
-        "ServiceProcess" => "Usar Microsoft.Extensions.Hosting (host portable); la integración con el gestor de servicios no-Windows queda para otro equipo.",
+        "ServiceProcess" => "Usar Microsoft.Extensions.Hosting (host multiplataforma) + Microsoft.Extensions.Hosting.Systemd (Linux) y Microsoft.Extensions.Hosting.WindowsServices (Windows): ambos paquetes multiplataforma cubren el arranque como servicio de forma transparente.",
         "PlatformAttribute" => "API marcada solo-Windows: buscar equivalente portable o aislar con OperatingSystem.IsWindows().",
-        "PInvoke" => "Sustituir por la API gestionada equivalente o aislar la llamada tras una interfaz (P/Invoke solo en Windows; la alternativa no-Windows queda como seam).",
+        "PInvoke" => "Sustituir por la API gestionada equivalente del BCL (multiplataforma); si no existe, usar una librería/NuGet multiplataforma que la cubra. Evitar el P/Invoke a DLLs de Windows.",
         _ => "Revisar el uso: sustituir por un equivalente portable o proteger por SO (OperatingSystem.IsWindows())."
     };
 }

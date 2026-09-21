@@ -142,9 +142,11 @@ Los proyectos generados **compilan** (validado); quedan listos a falta de conect
 
 **`--rewrite`** reescribe la **solución entera** a una **solución nueva hermana** (nunca toca la original) con
 enfoque **library-first**: lo que se puede hacer portable con **librerías multiplataforma** se hace portable
-(`net8.0`), y **el núcleo `.Core` queda 100% portable**. Va a Windows (`net8.0-windows`) **solo** lo que no
-tiene equivalente portable: la **interfaz gráfica** (WPF/WinForms) y las clases con **dependencia de Windows sin
-reemplazo por librería** (Registro, EventLog, WMI, DPAPI, P/Invoke, COM…). Si se pasa `--rewrite`, **NO** se
+(`net8.0`), de forma **transparente al SO** (la misma clase funciona en Windows y Linux), y **el núcleo `.Core`
+queda 100% portable**. La **única excepción de diseño es la GUI WPF/WinForms**, que no se migra (en Linux se
+construyen solo las clases y métodos, no la capa gráfica). También van a Windows las clases con **dependencia de
+Windows sin reemplazo por librería** (Registro, EventLog, WMI, P/Invoke, COM…); la cripto (DPAPI, CNG) **sí**
+tiene reemplazo y se queda portable (ver "Seguridad multiplataforma"). Si se pasa `--rewrite`, **NO** se
 genera el scaffold antiguo (`proyectos-separados/` + `SPLIT-NOTES`): lo sustituye.
 
 Cada proyecto se clasifica y emite así:
@@ -169,6 +171,15 @@ Qué hace, ya **implementado** (no son TODOs):
 - **Portabilidad con librerías**: los paquetes solo-Windows con equivalente directo se **cambian** en el `.csproj`
   portable (p. ej. `Oracle.DataAccess`/`System.Data.OracleClient` → `Oracle.ManagedDataAccess.Core`,
   `System.Data.SqlClient` → `Microsoft.Data.SqlClient`), con el **swap de `using`/namespace 1:1** aplicado al código.
+- **Seguridad multiplataforma (implementada, transparente al SO)**: la cripto solo-Windows se hace portable en el
+  propio código, sin dejar nada para otro equipo:
+  - **CNG/CSP** (`new RSACng(...)`, `new RSACryptoServiceProvider(...)`, `new ECDsaCng(...)`) → **factorías del BCL**
+    `RSA.Create()` / `ECDsa.Create()` (misma clase base; implementación nativa por SO: CNG en Windows, OpenSSL en Linux).
+  - **DPAPI** (`ProtectedData` / `DataProtectionScope`) → **ASP.NET Core Data Protection**
+    (`Microsoft.AspNetCore.DataProtection`). El reescritor **genera** un shim portable `PortableDataProtection.cs`
+    (`Portability.Security.ProtectedData`) con la **misma API**, añade el NuGet e inyecta `using Portability.Security;`,
+    de modo que las llamadas existentes **no cambian** y funcionan igual en Windows y Linux. (Caveat: los datos ya
+    cifrados con el DPAPI real de Windows deben re-protegerse una vez; lo nuevo es multiplataforma.)
 - **Rebase de namespaces al nuevo nombre del proyecto**: los proyectos separados declaran `namespace X.Core[.Sub]`
   y `namespace X.Windows[.Sub]`, y se **actualizan todas las referencias** de la solución (`using` y nombres
   cualificados). A cada fichero `.Windows` se le importan los namespaces `.Core` de su propio proyecto, para

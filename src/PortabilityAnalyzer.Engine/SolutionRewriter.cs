@@ -16,9 +16,9 @@ namespace PortabilityAnalyzer.Engine;
 /// recablean todas las <c>ProjectReference</c> entre los proyectos generados y se regenera el
 /// <c>.sln</c>. En los proyectos separados el <b>namespace se rebasa</b> al nuevo nombre
 /// (<c>X</c> → <c>X.Core</c> / <c>X.Windows</c>) y se actualizan todas las referencias de la solución. El
-/// núcleo portable queda <b>100% portable</b> y compilable en net8.0 (solo permanecen ahí las clases sin
-/// dependencia de Windows o resueltas por librería); lo específico de Windows queda aislado en su proyecto
-/// net8.0-windows, con el cableado por DI (seams) generado, listo para que otro equipo aporte otros SO.
+/// núcleo portable queda <b>100% portable</b> y compilable en net8.0 (las dependencias de Windows se
+/// resuelven con librerías/NuGets multiplataforma implementadas en el propio código, de forma transparente al
+/// SO). La única excepción es la GUI WPF/WinForms, que no se migra y queda aislada en su proyecto net8.0-windows.
 /// </summary>
 public sealed class SolutionRewriter
 {
@@ -346,6 +346,8 @@ public sealed class SolutionRewriter
                     CopyCode(portFiles, info.Dir, projDir, outName, BuildPortableOverrides(info, portFiles, nsSwaps, null),
                         rebaser, NamespaceRebaser.Side.Core, null);
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
+                    if (UsesDataProtection(portFiles))
+                        WriteGenerated(new[] { ("PortableDataProtection.cs", BuildDataProtectionShim()) }, projDir);
                     if (info.HasEntryPoint) entryPointOutputs.Add((outName, projDir, info));
                     var refs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
@@ -405,6 +407,8 @@ public sealed class SolutionRewriter
                         ? seam.CoreExtraFiles
                         : seam.CoreExtraFiles.Select(f => (f.Rel, rebaser.Rewrite(f.Content, NamespaceRebaser.Side.Core))).ToList();
                     WriteGenerated(coreExtra, coreDir);
+                    if (UsesDataProtection(seam.Portable))
+                        WriteGenerated(new[] { ("PortableDataProtection.cs", BuildDataProtectionShim()) }, coreDir);
                     var coreRefs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null)
@@ -877,6 +881,10 @@ public sealed class SolutionRewriter
             { lines.Add("<PackageReference Include=\"Microsoft.Data.SqlClient\" Version=\"5.2.2\" />"); present.Add("Microsoft.Data.SqlClient"); }
         }
 
+        // DPAPI made portable: the generated Portability.Security shim needs ASP.NET Core Data Protection.
+        if (UsesDataProtection(portableFiles) && !present.Any(p => p.Contains("Microsoft.AspNetCore.DataProtection", StringComparison.OrdinalIgnoreCase)))
+        { lines.Add("<PackageReference Include=\"Microsoft.AspNetCore.DataProtection.Extensions\" Version=\"8.0.10\" />"); present.Add("Microsoft.AspNetCore.DataProtection.Extensions"); }
+
         // Safety net: compile-enabling packages for any non-GUI Windows category that (unexpectedly) remains in
         // a portable file. With the "core stays 100% portable" policy these files now move to .Windows, so this
         // rarely triggers, but it keeps the core compiling if a residual finding slips through.
@@ -919,7 +927,13 @@ public sealed class SolutionRewriter
         foreach (var (from, to) in nsSwaps)
             content = System.Text.RegularExpressions.Regex.Replace(content, $@"\b{System.Text.RegularExpressions.Regex.Escape(from)}\b", to);
 
-        var flagged = info.Findings.Where(f => string.Equals(f.File, rel, StringComparison.OrdinalIgnoreCase) && !IsGuiCategory(f.Categoria)).ToList();
+        // Security: make Windows-only crypto portable in place (CNG/CSP -> BCL factories; DPAPI -> shim).
+        content = ApplySecuritySwaps(content);
+
+        // Only mark [PORTAR] for findings we could NOT resolve here (i.e. not GUI and not made portable via a
+        // library/BCL swap). Database/Cryptography are handled transparently above, so they are not flagged.
+        var flagged = info.Findings.Where(f => string.Equals(f.File, rel, StringComparison.OrdinalIgnoreCase)
+                                            && !IsGuiCategory(f.Categoria) && !IsPortableViaSwap(f.Categoria)).ToList();
         if (flagged.Count == 0) return content;
 
         var sb = new StringBuilder();
@@ -929,6 +943,136 @@ public sealed class SolutionRewriter
             sb.AppendLine($"//   L{f.Line} [{f.Categoria}] {f.Symbol}: {f.ComoCorregir}");
         sb.AppendLine();
         return sb.ToString() + content;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Security (Cryptography) cross-platform swaps + generated DPAPI replacement.
+    //
+    // Objetivo: mantener el código de seguridad MULTIPLATAFORMA usando librerías/BCL, de forma TRANSPARENTE
+    // al SO (sin dejar nada "para otro equipo"):
+    //   - CNG/CSP (RSACng, RSACryptoServiceProvider, ECDsaCng, DSACng) son solo-Windows -> se sustituyen por
+    //     las factorías del BCL RSA.Create()/ECDsa.Create()/DSA.Create(), que devuelven la implementación
+    //     nativa de cada SO (CNG en Windows, OpenSSL en Linux/macOS). Mismo tipo base, portable.
+    //   - DPAPI (ProtectedData/DataProtectionScope) es solo-Windows -> se apunta al shim portable generado
+    //     (Portability.Security.ProtectedData), respaldado por ASP.NET Core Data Protection.
+    // ---------------------------------------------------------------------------------------------
+
+    private const string PortableSecurityNamespace = "Portability.Security";
+
+    /// <summary>CNG/CSP concrete crypto types (Windows-only) -> portable BCL factory calls.</summary>
+    private static readonly (string From, string To)[] CryptoFactorySwaps =
+    {
+        ("new RSACng(", "RSA.Create("),
+        ("new RSACryptoServiceProvider(", "RSA.Create("),
+        ("new ECDsaCng(", "ECDsa.Create("),
+        ("new DSACng(", "DSA.Create("),
+    };
+
+    /// <summary>Applies the cross-platform security swaps to a portable file: CNG/CSP constructors -> BCL
+    /// factories, DPAPI fully-qualified names -> the generated shim, and injects <c>using
+    /// Portability.Security;</c> when DPAPI is used unqualified so it resolves to the shim.</summary>
+    private static string ApplySecuritySwaps(string content)
+    {
+        foreach (var (from, to) in CryptoFactorySwaps)
+            content = content.Replace(from, to);
+
+        // DPAPI: the Windows-only System.Security.Cryptography.ProtectedData/DataProtectionScope are provided
+        // by the generated portable shim in the Portability.Security namespace.
+        content = content
+            .Replace("System.Security.Cryptography.ProtectedData", PortableSecurityNamespace + ".ProtectedData")
+            .Replace("System.Security.Cryptography.DataProtectionScope", PortableSecurityNamespace + ".DataProtectionScope");
+
+        bool usesDpapi = System.Text.RegularExpressions.Regex.IsMatch(content, @"\b(ProtectedData|DataProtectionScope)\b");
+        bool hasUsing = System.Text.RegularExpressions.Regex.IsMatch(content, @"(?m)^\s*using\s+" +
+            System.Text.RegularExpressions.Regex.Escape(PortableSecurityNamespace) + @"\s*;");
+        if (usesDpapi && !hasUsing)
+            content = "using " + PortableSecurityNamespace + ";" + Environment.NewLine + content;
+        return content;
+    }
+
+    /// <summary>True if any of the given files uses DPAPI (ProtectedData): the project then needs the portable
+    /// Data Protection shim + package.</summary>
+    private bool UsesDataProtection(IEnumerable<(string Abs, string Rel)> files) =>
+        files.Any(f => ReadTextCached(f.Abs).Contains("ProtectedData", StringComparison.Ordinal));
+
+    /// <summary>Portable, OS-transparent replacement for Windows DPAPI, generated into the .Core project when
+    /// the code uses ProtectedData. Backed by ASP.NET Core Data Protection (works on Windows/Linux/macOS).</summary>
+    private static string BuildDataProtectionShim()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [Cross-platform rewrite] Portable, OS-transparent replacement for Windows DPAPI");
+        sb.AppendLine("// (System.Security.Cryptography.ProtectedData / DataProtectionScope).");
+        sb.AppendLine("//");
+        sb.AppendLine("// WHY: DPAPI is Windows-only and throws PlatformNotSupportedException on Linux/macOS. The");
+        sb.AppendLine("// migration goal is to keep the code cross-platform TRANSPARENTLY, using a library, with no");
+        sb.AppendLine("// per-OS implementation left to anyone else.");
+        sb.AppendLine("//");
+        sb.AppendLine("// WHAT: this shim exposes the SAME API (a static ProtectedData with Protect/Unprotect and a");
+        sb.AppendLine("// DataProtectionScope enum) so existing call sites compile and run UNCHANGED, but the");
+        sb.AppendLine("// implementation is backed by ASP.NET Core Data Protection");
+        sb.AppendLine("// (Microsoft.AspNetCore.DataProtection.Extensions), Microsoft's official cross-platform");
+        sb.AppendLine("// data-protection stack. Keys are generated once and persisted to a per-app key ring on disk;");
+        sb.AppendLine("// the payload is authenticated-encrypted (AES + HMAC) by the library on every OS.");
+        sb.AppendLine("//");
+        sb.AppendLine("// NOTES:");
+        sb.AppendLine("//  - optionalEntropy is folded into the Data Protection \"purpose\", preserving the DPAPI rule");
+        sb.AppendLine("//    that data protected with a given entropy can only be unprotected with the same entropy.");
+        sb.AppendLine("//  - DataProtectionScope.LocalMachine vs CurrentUser selects a machine-wide vs per-user key ring.");
+        sb.AppendLine("//  - MIGRATION CAVEAT (existing data at rest): blobs previously protected by the real Windows");
+        sb.AppendLine("//    DPAPI cannot be read by this stack (different key material). Re-protect them once on Windows");
+        sb.AppendLine("//    (read with the old DPAPI, write back with this shim). New data is cross-platform from now on.");
+        sb.AppendLine("using System;");
+        sb.AppendLine("using System.IO;");
+        sb.AppendLine("using Microsoft.AspNetCore.DataProtection;");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {PortableSecurityNamespace};");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>Cross-platform equivalent of the Windows-only DataProtectionScope (source compatibility).</summary>");
+        sb.AppendLine("public enum DataProtectionScope");
+        sb.AppendLine("{");
+        sb.AppendLine("    CurrentUser,");
+        sb.AppendLine("    LocalMachine");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>Drop-in, cross-platform replacement for the Windows-only ProtectedData (DPAPI),");
+        sb.AppendLine("/// backed by ASP.NET Core Data Protection. Same signatures, transparent to the OS.</summary>");
+        sb.AppendLine("public static class ProtectedData");
+        sb.AppendLine("{");
+        sb.AppendLine("    // One key-ring directory per scope. On first use the library generates the keys and persists");
+        sb.AppendLine("    // them here; later runs (any OS) reuse them. Point these to a stable/mounted path in production.");
+        sb.AppendLine("    private static readonly string CurrentUserKeyRing =");
+        sb.AppendLine("        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), \"dataprotection-keys\");");
+        sb.AppendLine("    private static readonly string LocalMachineKeyRing =");
+        sb.AppendLine("        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), \"dataprotection-keys\");");
+        sb.AppendLine();
+        sb.AppendLine("    private static IDataProtector CreateProtector(byte[]? optionalEntropy, DataProtectionScope scope)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var keyRing = scope == DataProtectionScope.LocalMachine ? LocalMachineKeyRing : CurrentUserKeyRing;");
+        sb.AppendLine("        Directory.CreateDirectory(keyRing);");
+        sb.AppendLine("        // DataProtectionProvider.Create persists keys to the given directory and runs on every OS.");
+        sb.AppendLine("        var provider = DataProtectionProvider.Create(new DirectoryInfo(keyRing));");
+        sb.AppendLine("        var protector = provider.CreateProtector(\"PortableDataProtection:\" + scope);");
+        sb.AppendLine("        // Fold the DPAPI optionalEntropy into the purpose chain (same isolation guarantee).");
+        sb.AppendLine("        if (optionalEntropy is { Length: > 0 })");
+        sb.AppendLine("            protector = protector.CreateProtector(Convert.ToBase64String(optionalEntropy));");
+        sb.AppendLine("        return protector;");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Cross-platform equivalent of ProtectedData.Protect (DPAPI).</summary>");
+        sb.AppendLine("    public static byte[] Protect(byte[] userData, byte[]? optionalEntropy, DataProtectionScope scope)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        ArgumentNullException.ThrowIfNull(userData);");
+        sb.AppendLine("        return CreateProtector(optionalEntropy, scope).Protect(userData);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Cross-platform equivalent of ProtectedData.Unprotect (DPAPI).</summary>");
+        sb.AppendLine("    public static byte[] Unprotect(byte[] encryptedData, byte[]? optionalEntropy, DataProtectionScope scope)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        ArgumentNullException.ThrowIfNull(encryptedData);");
+        sb.AppendLine("        return CreateProtector(optionalEntropy, scope).Unprotect(encryptedData);");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
     }
 
     /// <summary>Builds the code overrides (namespace swaps + [PORTAR] marks) for a set of portable files,
@@ -1168,8 +1312,8 @@ public sealed class SolutionRewriter
             sb.AppendLine("`.Windows` con seams y devuelve el proveedor; además se intentó invocarlo desde el punto de entrada");
             sb.AppendLine("(si no fue posible —p. ej. WPF con `Main` autogenerado— hay un aviso indicando dónde llamarlo).");
             sb.AppendLine();
-            sb.AppendLine("La implementación para otros SO (Linux…) se añade creando otra clase que implemente la misma interfaz");
-            sb.AppendLine("y registrándola en su lugar; **el núcleo no cambia** (queda preparado para otro equipo).");
+            sb.AppendLine("Los seams son un **último recurso** (solo cuando no hay librería multiplataforma): la interfaz vive en");
+            sb.AppendLine("el núcleo portable y su implementación se aporta **en el propio código**, sin dejar nada para otro equipo.");
             sb.AppendLine();
         }
 
@@ -1531,13 +1675,16 @@ public sealed class SolutionRewriter
     private static bool IsGuiCategory(string categoria) =>
         categoria.Equals("UI", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>True if a Windows finding of this category can be made portable IN PLACE with a clean library
-    /// swap (package + namespace), so the file can stay in the portable .Core. Only the managed database
-    /// drivers qualify (Oracle.ManagedDataAccess.Core, Microsoft.Data.SqlClient are cross-platform). Every
-    /// other Windows API (Registry, EventLog, WMI, DPAPI, P/Invoke, COM...) has no drop-in and moves to
+    /// <summary>True if a Windows finding of this category can be made portable IN PLACE with a cross-platform
+    /// library/BCL swap, so the file stays in the portable .Core:
+    ///  - "Database": managed drivers (Oracle.ManagedDataAccess.Core / Microsoft.Data.SqlClient).
+    ///  - "Cryptography": DPAPI -> ASP.NET Core Data Protection (generated shim) and CNG/CSP -> the portable
+    ///    BCL factories RSA.Create()/ECDsa.Create() (see <see cref="ApplySecuritySwaps"/>).
+    /// Every other Windows API (Registry, EventLog, WMI, P/Invoke, COM...) has no drop-in and moves to
     /// .Windows so the core stays 100% portable.</summary>
     private static bool IsPortableViaSwap(string categoria) =>
-        categoria.Equals("Database", StringComparison.OrdinalIgnoreCase);
+        categoria.Equals("Database", StringComparison.OrdinalIgnoreCase)
+        || categoria.Equals("Cryptography", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Database namespace swaps applied to portable files so the managed, cross-platform driver is
     /// used instead of the Windows-only / legacy provider (source-level, independent of the package reference).</summary>
