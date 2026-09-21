@@ -1,11 +1,12 @@
 # PortabilityAnalyzer
 
 Herramienta de consola (.NET 8) que analiza estáticamente una solución/proyecto de Windows y
-**estima el impacto y el coste de hacerla multiplataforma en .NET 8**, con enfoque **portable-first**:
-llevar todo lo posible a un **núcleo portable** (`net8.0`) y **aislar únicamente lo que obligatoriamente
-depende de Windows**, dejándolo **preparado para que otro equipo aporte la parte no-Windows**. El
-análisis **no prescribe** la plataforma destino ni implementa la UI de otro SO: separa, estructura y deja
-listo el punto de extensión.
+**estima el impacto y el coste de hacerla multiplataforma en .NET 8**, con enfoque **library-first**:
+hacer todo el código multiplataforma con **librerías/NuGets portables** implementados en el propio código y
+**transparentes al SO** (la misma clase funciona en Windows y Linux), **sin dejar nada para otro equipo**. La
+**única excepción es la GUI WPF/WinForms**, que no se migra: en Linux se construyen solo las clases y métodos
+(la lógica/ViewModels en el núcleo portable), no la capa gráfica. Además, con `--rewrite`, **genera** la
+solución multiplataforma completa (ver ["Reescritura completa"](#reescritura-completa-de-la-solución---rewrite)).
 
 Detecta dependencias del sistema operativo Windows a nivel de **IL** (Mono.Cecil: P/Invoke, COM,
 referencias a ensamblados solo-Windows, atributos de plataforma) y a nivel de **código fuente** (Roslyn:
@@ -129,7 +130,7 @@ en una subcarpeta dedicada **`proyectos-separados/`** (nunca colisiona con el c�
   (XAML/resx/recursos), usa **namespace separado** para el núcleo y genera `GlobalUsings.cs`.
 - **Seams por categoría**: interfaz portable en el núcleo + implementación Windows real (con su paquete NuGet).
 - **Separación por método**: los métodos que usan API de Windows se envuelven en `#if WINDOWS` con un `#else`
-  (stub) que **indica el hueco no-Windows**.
+  donde va la **implementación multiplataforma** (librería/NuGet o API gestionada del BCL).
 - **Umbral de portabilidad**: un fichero mayormente portable con **≤ 2 métodos** Windows y sin acoplamiento
   de clase **se queda en el núcleo** (que pasa a **multi-target** `net8.0;net8.0-windows` con paquetes Windows
   condicionales), y se genera una **interfaz (seam) por clase** para la separación limpia.
