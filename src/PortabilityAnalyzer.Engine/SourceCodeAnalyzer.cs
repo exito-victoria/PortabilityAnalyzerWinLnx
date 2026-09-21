@@ -21,6 +21,9 @@ public sealed class SourceCodeAnalyzer
     private static readonly Signal[] Signals =
     {
         // Directivas using de espacios de nombres solo-Windows.
+        // System.Windows.Threading (WPF Dispatcher) es hilos/sincronizacion, NO GUI: prefijo mas largo que
+        // System.Windows para que gane y se clasifique como "Threading" (el DispatcherTimer es reemplazable).
+        new("System.Windows.Threading", Kind.UsingNamespace, "Threading"),
         new("System.Windows.Forms", Kind.UsingNamespace, "UI"),
         new("System.Windows", Kind.UsingNamespace, "UI"),
         new("System.Data.OracleClient", Kind.UsingNamespace, "Database"),
@@ -45,6 +48,8 @@ public sealed class SourceCodeAnalyzer
         new("Dispatcher", Kind.TypeName, "Threading"),
         new("DispatcherTimer", Kind.TypeName, "Threading"),
         new("DispatcherObject", Kind.TypeName, "Threading"),
+        new("DispatcherSynchronizationContext", Kind.TypeName, "Threading"),
+        new("WindowsFormsSynchronizationContext", Kind.TypeName, "Threading"),
         new("MessageBox", Kind.TypeName, "UI"),
         new("NotifyIcon", Kind.TypeName, "UI"),
         new("ManagementObject", Kind.TypeName, "WMI"),
@@ -246,7 +251,7 @@ public sealed class SourceCodeAnalyzer
         "Database" => "Migrar a Oracle.ManagedDataAccess.Client (paquete .Core, portable) y adaptar la cadena de conexión.",
         "Registry" => "Externalizar la configuración (appsettings.json / IConfiguration); si debe seguir en Windows, aislar tras una interfaz ISettingsStore por SO.",
         "Identity" => "Multiplataforma con librería: nombre de usuario con Environment.UserName; para directorio, System.DirectoryServices.Protocols o Novell.Directory.Ldap (LDAP multiplataforma). Encapsular tras IUserIdentity con implementación multiplataforma integrada.",
-        "Threading" => "En el núcleo, reemplazar la sincronización con UI por async/await; STAThread/Dispatcher solo en el arranque de la UI Windows.",
+        "Threading" => "Hilos/tareas: Thread, Task, Parallel, async/await, ThreadPool, SemaphoreSlim y System.Threading.Timer YA son multiplataforma. Lo específico de Windows: DispatcherTimer (WPF) -> temporizador portable (System.Timers.Timer / System.Threading.PeriodicTimer); el reescritor lo cambia por un shim Portability.Threading.PortableTimer con la misma API. Dispatcher.Invoke/BeginInvoke (marshalling a UI) -> async/await + IProgress<T> o SynchronizationContext capturado. STAThread es no-op fuera de Windows (inofensivo).",
         "Cryptography" => "Multiplataforma con librería/BCL, transparente al SO: CNG/CSP (RSACng, RSACryptoServiceProvider, ECDsaCng) -> factorías del BCL RSA.Create()/ECDsa.Create()/Aes.Create(); DPAPI (ProtectedData) -> ASP.NET Core Data Protection (Microsoft.AspNetCore.DataProtection), con un shim ProtectedData portable de la misma API. El reescritor aplica ambos cambios.",
         "WMI" => "Multiplataforma con librería: RuntimeInformation (SO/arquitectura) y, para hardware/inventario, una librería multiplataforma (p. ej. Hardware.Info). Encapsular tras una interfaz con implementación multiplataforma integrada.",
         "COM" => "COM está atado a Windows: abstraer el servicio tras una interfaz portable o eliminar la dependencia.",

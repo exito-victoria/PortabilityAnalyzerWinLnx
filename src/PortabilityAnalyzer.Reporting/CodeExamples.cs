@@ -136,7 +136,27 @@ public static class CodeExamples
             hw.RefreshMemoryStatus();
             // La implementación multiplataforma se aporta aquí; no se deja nada para otro equipo.
             """,
-            "WMI es exclusivo de Windows; RuntimeInformation + una librería como Hardware.Info cubren la información de forma multiplataforma.")
+            "WMI es exclusivo de Windows; RuntimeInformation + una librería como Hardware.Info cubren la información de forma multiplataforma."),
+
+        new("Threading", "Hilos y temporizadores -> multiplataforma (BCL)",
+            """
+            // Hilos/tareas YA portables (sin cambios): Thread, Task, Parallel, async/await, ThreadPool,
+            // SemaphoreSlim, System.Threading.Timer. Solo lo de WPF/Windows se reemplaza:
+
+            // Solo Windows (WPF): DispatcherTimer.
+            var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            t.Tick += (s, e) => Refrescar();
+            t.Start();
+
+            // Portable y TRANSPARENTE: el reescritor lo cambia por Portability.Threading.PortableTimer
+            // (misma API: Interval/Tick/Start/Stop), respaldado por System.Timers.Timer y marshalling al
+            // SynchronizationContext capturado. El código de arriba no cambia (solo el tipo).
+
+            // Marshalling a la UI (Dispatcher.Invoke) -> async/await + IProgress<T> (multiplataforma):
+            var progreso = new Progress<int>(p => BarraProgreso = p);  // se entrega en el hilo capturado
+            await Task.Run(() => TrabajoPesado(progreso));
+            """,
+            "Task/Parallel/async ya son multiplataforma; DispatcherTimer -> PortableTimer (temporizador del BCL) y el marshalling a UI -> async/await + IProgress<T> o SynchronizationContext.")
     };
 
     /// <summary>Titulo, bloque de codigo y nota en INGLES por categoria (traduccion completa del apendice).</summary>
@@ -258,6 +278,25 @@ public static class CodeExamples
             // The cross-platform implementation is provided here; nothing is left for another team.
             """,
             "WMI is Windows-only; RuntimeInformation + a library like Hardware.Info cover the information cross-platform."),
+        ["Threading"] = ("Threads and timers -> cross-platform (BCL)",
+            """
+            // Threads/tasks are ALREADY portable (no change): Thread, Task, Parallel, async/await, ThreadPool,
+            // SemaphoreSlim, System.Threading.Timer. Only the WPF/Windows bits are replaced:
+
+            // Windows only (WPF): DispatcherTimer.
+            var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            t.Tick += (s, e) => Refresh();
+            t.Start();
+
+            // Portable and TRANSPARENT: the rewriter swaps it for Portability.Threading.PortableTimer
+            // (same API: Interval/Tick/Start/Stop), backed by System.Timers.Timer and marshalling to the
+            // captured SynchronizationContext. The code above does not change (only the type).
+
+            // UI marshalling (Dispatcher.Invoke) -> async/await + IProgress<T> (cross-platform):
+            var progress = new Progress<int>(p => ProgressBar = p);  // delivered on the captured thread
+            await Task.Run(() => HeavyWork(progress));
+            """,
+            "Task/Parallel/async are already cross-platform; DispatcherTimer -> PortableTimer (a BCL timer) and UI marshalling -> async/await + IProgress<T> or SynchronizationContext."),
     };
 
     /// <summary>Ejemplos correspondientes a las categorias indicadas, en el idioma solicitado.</summary>

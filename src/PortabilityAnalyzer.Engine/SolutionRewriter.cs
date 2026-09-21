@@ -177,7 +177,7 @@ public sealed class SolutionRewriter
             info.FindingFiles = info.Findings.Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
             info.GuiFindingFiles = info.Findings.Where(f => IsGuiCategory(f.Categoria)).Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
             // A file is Windows-bound if it has a GUI finding OR a Windows finding with no clean library swap.
-            info.WinDependentFiles = info.Findings.Where(f => IsGuiCategory(f.Categoria) || !IsPortableViaSwap(f.Categoria))
+            info.WinDependentFiles = info.Findings.Where(f => IsGuiCategory(f.Categoria) || !FindingIsPortableViaSwap(f))
                                                   .Select(f => f.File).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var f in info.CodeFiles)
                 if (IsEntryPoint(f.Abs)) { info.HasEntryPoint = true; break; }
@@ -348,6 +348,8 @@ public sealed class SolutionRewriter
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
                     if (UsesDataProtection(portFiles))
                         WriteGenerated(new[] { ("PortableDataProtection.cs", BuildDataProtectionShim()) }, projDir);
+                    if (UsesPortableThreading(portFiles))
+                        WriteGenerated(new[] { ("PortableThreading.cs", BuildPortableTimerShim()) }, projDir);
                     if (info.HasEntryPoint) entryPointOutputs.Add((outName, projDir, info));
                     var refs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
@@ -409,6 +411,8 @@ public sealed class SolutionRewriter
                     WriteGenerated(coreExtra, coreDir);
                     if (UsesDataProtection(seam.Portable))
                         WriteGenerated(new[] { ("PortableDataProtection.cs", BuildDataProtectionShim()) }, coreDir);
+                    if (UsesPortableThreading(seam.Portable))
+                        WriteGenerated(new[] { ("PortableThreading.cs", BuildPortableTimerShim()) }, coreDir);
                     var coreRefs = info.RefNames.Select(CoreSideRef).Where(x => x is not null).Select(x => x!).ToList();
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null)
@@ -889,7 +893,7 @@ public sealed class SolutionRewriter
         // a portable file. With the "core stays 100% portable" policy these files now move to .Windows, so this
         // rarely triggers, but it keeps the core compiling if a residual finding slips through.
         var categories = info.Findings
-            .Where(f => portableRel.Contains(f.File) && !IsGuiCategory(f.Categoria) && !IsPortableViaSwap(f.Categoria))
+            .Where(f => portableRel.Contains(f.File) && !IsGuiCategory(f.Categoria) && !FindingIsPortableViaSwap(f))
             .Select(f => f.Categoria).Distinct(StringComparer.OrdinalIgnoreCase);
         foreach (var cat in categories)
         {
@@ -930,10 +934,13 @@ public sealed class SolutionRewriter
         // Security: make Windows-only crypto portable in place (CNG/CSP -> BCL factories; DPAPI -> shim).
         content = ApplySecuritySwaps(content);
 
+        // Threading: make the WPF DispatcherTimer portable in place (-> generated PortableTimer shim).
+        content = ApplyThreadingSwaps(content);
+
         // Only mark [PORTAR] for findings we could NOT resolve here (i.e. not GUI and not made portable via a
         // library/BCL swap). Database/Cryptography are handled transparently above, so they are not flagged.
         var flagged = info.Findings.Where(f => string.Equals(f.File, rel, StringComparison.OrdinalIgnoreCase)
-                                            && !IsGuiCategory(f.Categoria) && !IsPortableViaSwap(f.Categoria)).ToList();
+                                            && !IsGuiCategory(f.Categoria) && !FindingIsPortableViaSwap(f)).ToList();
         if (flagged.Count == 0) return content;
 
         var sb = new StringBuilder();
@@ -1071,6 +1078,122 @@ public sealed class SolutionRewriter
         sb.AppendLine("        ArgumentNullException.ThrowIfNull(encryptedData);");
         sb.AppendLine("        return CreateProtector(optionalEntropy, scope).Unprotect(encryptedData);");
         sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Threading (hilos/tareas) cross-platform swaps + generated portable timer.
+    //
+    // Objetivo: hilos y tareas paralelas/asíncronas MULTIPLATAFORMA, transparente al SO. La mayoría del
+    // modelo de hilos del BCL YA es portable (Thread, Task, Parallel, async/await, ThreadPool, SemaphoreSlim,
+    // System.Threading.Timer) y NO se toca. Lo específico de Windows:
+    //   - WPF DispatcherTimer (System.Windows.Threading) -> se sustituye por un shim portable
+    //     Portability.Threading.PortableTimer con la MISMA API (Interval/Tick/Start/Stop), respaldado por
+    //     System.Timers.Timer y con marshalling al SynchronizationContext capturado. Cambio transparente.
+    //   - Dispatcher.Invoke/BeginInvoke (marshalling a UI) NO se auto-reescribe (semántica de UI): esos
+    //     ficheros van al lado Windows; la guía (async/await + IProgress<T>) está en el informe.
+    // ---------------------------------------------------------------------------------------------
+
+    private const string PortableThreadingNamespace = "Portability.Threading";
+
+    /// <summary>Applies the cross-platform threading swaps to a portable file: WPF DispatcherTimer -> the
+    /// generated PortableTimer, drops the (now unavailable) System.Windows.Threading using and imports the
+    /// portable namespace.</summary>
+    private static string ApplyThreadingSwaps(string content)
+    {
+        if (!content.Contains("DispatcherTimer", StringComparison.Ordinal)) return content;
+
+        // Swap the type name everywhere (declarations, `new`, fields). PortableTimer mirrors its surface.
+        content = System.Text.RegularExpressions.Regex.Replace(content, @"\bDispatcherTimer\b", "PortableTimer");
+        // Remove the WPF threading using (System.Windows.Threading is not available in the portable core).
+        content = System.Text.RegularExpressions.Regex.Replace(content, @"(?m)^\s*using\s+System\.Windows\.Threading\s*;\s*\r?\n", string.Empty);
+
+        bool hasUsing = System.Text.RegularExpressions.Regex.IsMatch(content, @"(?m)^\s*using\s+" +
+            System.Text.RegularExpressions.Regex.Escape(PortableThreadingNamespace) + @"\s*;");
+        if (!hasUsing)
+            content = "using " + PortableThreadingNamespace + ";" + Environment.NewLine + content;
+        return content;
+    }
+
+    /// <summary>True if any of the given files uses the WPF DispatcherTimer: the project then needs the portable
+    /// timer shim.</summary>
+    private bool UsesPortableThreading(IEnumerable<(string Abs, string Rel)> files) =>
+        files.Any(f => ReadTextCached(f.Abs).Contains("DispatcherTimer", StringComparison.Ordinal));
+
+    /// <summary>Portable, OS-transparent replacement for the WPF DispatcherTimer, generated into the .Core
+    /// project when the code uses it. Mirrors DispatcherTimer's surface (Interval/Tick/Start/Stop/IsEnabled)
+    /// and is backed by System.Timers.Timer, marshalling the Tick to the captured SynchronizationContext.</summary>
+    private static string BuildPortableTimerShim()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// [Cross-platform rewrite] Portable, OS-transparent replacement for the WPF DispatcherTimer");
+        sb.AppendLine("// (System.Windows.Threading.DispatcherTimer).");
+        sb.AppendLine("//");
+        sb.AppendLine("// WHY: DispatcherTimer belongs to WPF (Windows only) and ties the callback to the WPF");
+        sb.AppendLine("// Dispatcher thread. The migration goal is cross-platform code, transparent to the OS, using");
+        sb.AppendLine("// the BCL only, without any per-OS implementation.");
+        sb.AppendLine("//");
+        sb.AppendLine("// WHAT: this shim exposes the SAME surface (Interval, Tick, Start, Stop, IsEnabled) so existing");
+        sb.AppendLine("// call sites compile and run UNCHANGED, but it is backed by System.Timers.Timer (cross-platform).");
+        sb.AppendLine("// The Tick is marshalled back to the SynchronizationContext captured at construction time, so a");
+        sb.AppendLine("// timer created on a UI thread still raises Tick on that thread (same behaviour as DispatcherTimer),");
+        sb.AppendLine("// and off any UI it simply runs on a thread-pool thread.");
+        sb.AppendLine("//");
+        sb.AppendLine("// HOW TO CONFIRM/TEST: create a PortableTimer, set Interval, subscribe Tick, call Start(); verify");
+        sb.AppendLine("// the Tick fires at the interval on Windows and Linux. For UI updates, ensure it is constructed on");
+        sb.AppendLine("// the UI thread (so SynchronizationContext.Current is the UI context) or marshal in the handler.");
+        sb.AppendLine("//");
+        sb.AppendLine("// NOTE: for purely asynchronous loops prefer System.Threading.PeriodicTimer (await timer.WaitForNextTickAsync()).");
+        sb.AppendLine("using System;");
+        sb.AppendLine("using System.Threading;");
+        sb.AppendLine("using Timers = System.Timers;");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {PortableThreadingNamespace};");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>Cross-platform drop-in for the WPF DispatcherTimer (same Interval/Tick/Start/Stop API).</summary>");
+        sb.AppendLine("public sealed class PortableTimer : IDisposable");
+        sb.AppendLine("{");
+        sb.AppendLine("    private readonly Timers.Timer _timer = new() { AutoReset = true };");
+        sb.AppendLine("    private readonly SynchronizationContext? _ctx = SynchronizationContext.Current;");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Raised on each interval, marshalled to the captured SynchronizationContext when there is one.</summary>");
+        sb.AppendLine("    public event EventHandler? Tick;");
+        sb.AppendLine();
+        sb.AppendLine("    // Absorbs the DispatcherTimer(DispatcherPriority[, Dispatcher]) overloads; the arguments are");
+        sb.AppendLine("    // not needed in the portable model, so they are ignored.");
+        sb.AppendLine("    public PortableTimer(params object?[] _ignored)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        _timer.Interval = 1000;");
+        sb.AppendLine("        _timer.Elapsed += (_, __) => Raise();");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Interval between ticks (same semantics as DispatcherTimer.Interval).</summary>");
+        sb.AppendLine("    public TimeSpan Interval");
+        sb.AppendLine("    {");
+        sb.AppendLine("        get => TimeSpan.FromMilliseconds(_timer.Interval);");
+        sb.AppendLine("        set => _timer.Interval = value.TotalMilliseconds <= 0 ? 1 : value.TotalMilliseconds;");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Whether the timer is running (same semantics as DispatcherTimer.IsEnabled).</summary>");
+        sb.AppendLine("    public bool IsEnabled");
+        sb.AppendLine("    {");
+        sb.AppendLine("        get => _timer.Enabled;");
+        sb.AppendLine("        set { if (value) Start(); else Stop(); }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public void Start() => _timer.Start();");
+        sb.AppendLine("    public void Stop() => _timer.Stop();");
+        sb.AppendLine();
+        sb.AppendLine("    private void Raise()");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var handler = Tick;");
+        sb.AppendLine("        if (handler is null) return;");
+        sb.AppendLine("        if (_ctx is not null) _ctx.Post(_ => handler(this, EventArgs.Empty), null);");
+        sb.AppendLine("        else handler(this, EventArgs.Empty);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public void Dispose() => _timer.Dispose();");
         sb.AppendLine("}");
         return sb.ToString();
     }
@@ -1685,6 +1808,20 @@ public sealed class SolutionRewriter
     private static bool IsPortableViaSwap(string categoria) =>
         categoria.Equals("Database", StringComparison.OrdinalIgnoreCase)
         || categoria.Equals("Cryptography", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Finding-level version of <see cref="IsPortableViaSwap(string)"/>. Database and Cryptography are
+    /// portable for the whole category; "Threading" is portable only for the swappable symbols (the WPF
+    /// <c>DispatcherTimer</c> -> generated PortableTimer, and the <c>System.Windows.Threading</c> using that is
+    /// dropped). A Threading finding on <c>Dispatcher</c>/<c>DispatcherObject</c> (UI-thread marshalling) is NOT
+    /// swappable and keeps its file on the Windows side.</summary>
+    private static bool FindingIsPortableViaSwap(SourceFinding f) =>
+        IsPortableViaSwap(f.Categoria)
+        || (f.Categoria.Equals("Threading", StringComparison.OrdinalIgnoreCase) && IsPortableThreadingSymbol(f.Symbol));
+
+    /// <summary>A Threading symbol that the rewriter can make portable in place.</summary>
+    private static bool IsPortableThreadingSymbol(string symbol) =>
+        symbol.Contains("DispatcherTimer", StringComparison.Ordinal)
+        || symbol.Equals("System.Windows.Threading", StringComparison.Ordinal);
 
     /// <summary>Database namespace swaps applied to portable files so the managed, cross-platform driver is
     /// used instead of the Windows-only / legacy provider (source-level, independent of the package reference).</summary>

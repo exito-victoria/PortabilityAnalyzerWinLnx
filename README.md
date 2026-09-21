@@ -181,6 +181,17 @@ Qué hace, ya **implementado** (no son TODOs):
     (`Portability.Security.ProtectedData`) con la **misma API**, añade el NuGet e inyecta `using Portability.Security;`,
     de modo que las llamadas existentes **no cambian** y funcionan igual en Windows y Linux. (Caveat: los datos ya
     cifrados con el DPAPI real de Windows deben re-protegerse una vez; lo nuevo es multiplataforma.)
+- **Hilos y tareas multiplataforma (implementado, transparente al SO)**: el modelo de hilos del BCL (`Thread`,
+  `Task`, `Parallel`, `async/await`, `ThreadPool`, `SemaphoreSlim`, `System.Threading.Timer`) **ya es portable**
+  y no se toca. Lo específico de Windows se reemplaza:
+  - **WPF `DispatcherTimer`** (`System.Windows.Threading`) → el reescritor **genera** un shim
+    `PortableThreading.cs` (`Portability.Threading.PortableTimer`) con la **misma API** (`Interval`/`Tick`/`Start`/
+    `Stop`/`IsEnabled`), respaldado por `System.Timers.Timer` y con *marshalling* al `SynchronizationContext`
+    capturado; cambia el tipo e importa el namespace portable, **sin tocar la lógica**. Para bucles asíncronos,
+    la guía recomienda `System.Threading.PeriodicTimer`.
+  - **`Dispatcher.Invoke`/`BeginInvoke`** (marshalling a la UI) **no** se auto-reescribe (semántica de UI): esos
+    ficheros quedan en el lado Windows y el informe da la **guía** (`async/await` + `IProgress<T>` o
+    `SynchronizationContext`) para confirmarlo y probarlo en el código. `STAThread` es *no-op* fuera de Windows.
 - **Rebase de namespaces al nuevo nombre del proyecto**: los proyectos separados declaran `namespace X.Core[.Sub]`
   y `namespace X.Windows[.Sub]`, y se **actualizan todas las referencias** de la solución (`using` y nombres
   cualificados). A cada fichero `.Windows` se le importan los namespaces `.Core` de su propio proyecto, para
