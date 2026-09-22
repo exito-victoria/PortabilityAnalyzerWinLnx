@@ -501,6 +501,16 @@ public sealed class SolutionRewriter
         var slnPath = Path.Combine(outputDir, solutionName + ".sln");
         WriteSolution(slnPath, emitted);
         var buildOrder = ComputeBuildOrder(outputDir, emitted);
+
+        // 5b) Directory.Build.props: reubica obj/bin a una ruta CORTA (perfil de usuario) para evitar el límite
+        // MAX_PATH (260) de Windows cuando la solución generada vive en una ruta profunda. Es la causa habitual
+        // de "no se pueden cargar los proyectos" (VS falla al escribir en obj\Debug\net8.0-windows\...).
+        WriteDirectoryBuildProps(outputDir, solutionName);
+
+        // 5c) Aviso preventivo: ficheros FUENTE cuya ruta se acerca al límite (obj/bin ya van a ruta corta, pero
+        // los .cs fuente viven en la carpeta de salida; si es muy profunda, VS puede fallar al cargarlos).
+        WarnOnLongPaths(outputDir, warnings);
+
         WriteMigrationReadme(Path.Combine(outputDir, "MIGRACION.md"), solutionName, rewritten, warnings, allSeams, buildOrder);
 
         return new RewriteResult
@@ -510,6 +520,63 @@ public sealed class SolutionRewriter
             Projects = rewritten,
             Warnings = warnings
         };
+    }
+
+    /// <summary>Writes a Directory.Build.props at the generated solution root that redirects obj/bin to a SHORT
+    /// path under the user profile. The deep intermediate paths (<c>&lt;project&gt;\obj\Debug\net8.0-windows\…</c>,
+    /// with long generated filenames) are the usual thing that blows past the Windows MAX_PATH (260) limit and
+    /// makes Visual Studio fail to load the projects; keeping them short avoids it regardless of how deep the
+    /// output solution lives. Delete this file to restore the default per-project obj/bin layout.</summary>
+    private static void WriteDirectoryBuildProps(string outputDir, string solutionName)
+    {
+        var key = ShortHash(Path.GetFullPath(outputDir));
+        var sb = new StringBuilder();
+        sb.AppendLine("<Project>");
+        sb.AppendLine();
+        sb.AppendLine("  <!-- [Cross-platform rewrite] Keeps obj/bin paths SHORT to avoid the Windows MAX_PATH (260)");
+        sb.AppendLine("       limit when this solution lives in a deep folder (otherwise VS may fail to load the");
+        sb.AppendLine("       projects). Intermediate/output files go to a short path under the user profile instead of");
+        sb.AppendLine("       <project>\\obj\\Debug\\net8.0-windows\\... . Delete this file to restore the default layout. -->");
+        sb.AppendLine("  <PropertyGroup>");
+        sb.AppendLine($"    <_RewriteBuildRoot>$(USERPROFILE)\\.pa-builds\\{key}</_RewriteBuildRoot>");
+        sb.AppendLine("    <BaseIntermediateOutputPath>$(_RewriteBuildRoot)\\$(MSBuildProjectName)\\obj\\</BaseIntermediateOutputPath>");
+        sb.AppendLine("    <BaseOutputPath>$(_RewriteBuildRoot)\\$(MSBuildProjectName)\\bin\\</BaseOutputPath>");
+        sb.AppendLine("  </PropertyGroup>");
+        sb.AppendLine();
+        sb.AppendLine("</Project>");
+        File.WriteAllText(Path.Combine(outputDir, "Directory.Build.props"), sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>Short, stable 8-hex-char key derived from a string (used to give each generated solution its own
+    /// short obj/bin build root without collisions).</summary>
+    private static string ShortHash(string s)
+    {
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        var h = md5.ComputeHash(Encoding.UTF8.GetBytes(s));
+        return Convert.ToHexString(h)[..8].ToLowerInvariant();
+    }
+
+    /// <summary>Adds a warning if any generated SOURCE file path is at/near the Windows MAX_PATH (260) limit, so
+    /// the user can pick a shorter --rewrite root or enable long paths. (obj/bin are relocated by the generated
+    /// Directory.Build.props, so only the source tree under the output folder is at risk here.)</summary>
+    private static void WarnOnLongPaths(string outputDir, List<string> warnings)
+    {
+        const int limit = 260, warnAt = 250;
+        var offenders = new List<(int Len, string Rel)>();
+        int max = 0;
+        foreach (var f in Directory.EnumerateFiles(outputDir, "*", SearchOption.AllDirectories))
+        {
+            var len = Path.GetFullPath(f).Length;
+            if (len > max) max = len;
+            if (len >= warnAt) offenders.Add((len, Path.GetRelativePath(outputDir, f)));
+        }
+        if (offenders.Count == 0) return;
+        var top = offenders.OrderByDescending(o => o.Len).Take(5).Select(o => $"{o.Len} car. — {o.Rel}");
+        warnings.Add($"Rutas largas: {offenders.Count} fichero(s) generados alcanzan o superan {warnAt}/{limit} caracteres " +
+                     $"(máximo {max}). Windows limita las rutas a {limit} y Visual Studio puede fallar al cargar los proyectos. " +
+                     "Solución: elige un --rewrite MÁS CORTO (p. ej. C:\\out) o habilita rutas largas en Windows " +
+                     "(HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled = 1 y reinicia Visual Studio). " +
+                     $"Ejemplos: {string.Join(" | ", top)}");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -1465,6 +1532,15 @@ public sealed class SolutionRewriter
         sb.AppendLine("2. El `CompositionRoot.Build()` (AddWindowsSeams) ya está generado y cableado en el arranque; complétalo");
         sb.AppendLine("   registrando tus servicios y el tipo raíz de la app.");
         sb.AppendLine("3. Añade un CI multiplataforma (matriz Windows + Linux) que compile los núcleos portables.");
+        sb.AppendLine();
+        sb.AppendLine("## Rutas largas (Windows MAX_PATH 260)");
+        sb.AppendLine("- Se ha generado un **`Directory.Build.props`** que reubica `obj`/`bin` a una ruta corta bajo el perfil");
+        sb.AppendLine("  de usuario (`%USERPROFILE%\\.pa-builds\\…`), para que las rutas intermedias no superen el límite de");
+        sb.AppendLine("  **260 caracteres** de Windows (causa habitual de que Visual Studio **no cargue** los proyectos).");
+        sb.AppendLine("  Bórralo si prefieres el `obj`/`bin` por proyecto.");
+        sb.AppendLine("- Si el aviso de \"Rutas largas\" aparece, algún **fichero fuente** queda cerca del límite: mueve esta");
+        sb.AppendLine("  solución a una carpeta **más corta**, o habilita rutas largas en Windows");
+        sb.AppendLine("  (`HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled = 1` y reinicia Visual Studio).");
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
     }
 

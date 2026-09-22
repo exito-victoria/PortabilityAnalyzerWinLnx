@@ -230,9 +230,15 @@ Qué hace, ya **implementado** (no son TODOs):
   nombre de la lista que **no** coincida (mostrando los disponibles) — úsalo para copiar los nombres exactos.
 - Apunta siempre al **`.sln`** (no a un `.csproj` suelto) para que las referencias entre proyectos se recableen.
 - `--rewrite` debe estar **fuera** de la carpeta de la solución original.
-- Usa una **carpeta de salida corta** (p. ej. `C:\salida\...`). Con nombres de proyecto largos y rutas muy
-  profundas se puede superar el límite **MAX_PATH (260)** de Windows y la compilación de la solución generada
-  fallaría al copiar los ensamblados (`MSB3030`). Si necesitas rutas largas, habilita *long paths* en Windows.
+- **Rutas largas (MAX_PATH 260 de Windows).** La reescritura genera un **`Directory.Build.props`** en la raíz de
+  la solución nueva que **reubica `obj`/`bin`** a una ruta corta bajo el perfil de usuario
+  (`%USERPROFILE%\.pa-builds\<id>\…`). Esto evita el fallo típico de que **Visual Studio no cargue los proyectos**
+  por superar 260 caracteres en las rutas intermedias (`…\obj\Debug\net8.0-windows\…`), aunque la solución viva
+  en una carpeta profunda. (Bórralo si prefieres el `obj`/`bin` por proyecto.)
+- Aun así, conviene usar una **carpeta de salida corta** (p. ej. `C:\out\...`): si algún **fichero fuente** queda
+  cerca del límite, la herramienta lo **avisa** (mensaje "Rutas largas"). En ese caso, mueve la solución a una ruta
+  más corta o habilita *long paths* en Windows (`HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled = 1`
+  y reinicia Visual Studio).
 
 ## Descubrimiento de reglas (`--discover-rules`)
 

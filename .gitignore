@@ -8,3 +8,4 @@ obj/
 
 # Especificacion / prompt de trabajo interno: solo local, no se sube a GitHub
 docs/especificacion-multiplataforma.md
+portability-report.json
