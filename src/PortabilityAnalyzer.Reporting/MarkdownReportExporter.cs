@@ -82,7 +82,7 @@ public sealed class MarkdownReportExporter : IReportExporter
 
         sb.AppendLine("## Arquitectura destino recomendada y plan de migración");
         sb.AppendLine();
-        sb.AppendLine($"Objetivo: **código .NET 8 multiplataforma** usando **librerías/NuGets portables**, de forma **transparente al SO** (la misma clase funciona en Windows y Linux, sin dejar nada para otro equipo). **Única excepción: la GUI WPF**, que no se migra (en Linux solo se construyen las clases y métodos, no la capa gráfica). Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: **{plan.Blockers}**.");
+        sb.AppendLine($"Objetivo: código .NET 8 multiplataforma usando librerías/NuGets portables, de forma transparente al SO (la misma clase funciona en Windows y Linux, sin dejar nada para otro equipo). Única excepción: la GUI WPF, que no se migra (en Linux solo se construyen las clases y métodos, no la capa gráfica). Esfuerzo total estimado (con Pruebas y CI): **{plan.TotalWithTesting.Media:0.#} h** (optimista {plan.TotalWithTesting.Optimista:0.#} / pesimista {plan.TotalWithTesting.Pesimista:0.#}). Bloqueantes: {plan.Blockers}.");
         sb.AppendLine();
 
         if (plan.RoleNotes.Count > 0)
@@ -162,7 +162,7 @@ public sealed class MarkdownReportExporter : IReportExporter
 
         sb.AppendLine("## Aislamiento por SO y equivalencias portables (ejemplos)");
         sb.AppendLine();
-        sb.AppendLine("> Ejemplos de código para cada tipo de dependencia detectada: la equivalencia portable o cómo aislar lo que hoy exige Windows (`OperatingSystem.IsWindows()` / `#if`), dejando el hueco preparado. No se desarrolla la implementación de otra plataforma.");
+        sb.AppendLine("> Ejemplos de código para cada tipo de dependencia detectada: la equivalencia multiplataforma con librería/BCL, implementada en el propio código y transparente al SO. Solo si no existe una librería se aísla con `OperatingSystem.IsWindows()` / `#if`.");
         sb.AppendLine();
         foreach (var e in examples)
         {
@@ -264,7 +264,7 @@ public sealed class MarkdownReportExporter : IReportExporter
         var i = 1;
         foreach (var s in bo.Steps)
         {
-            var dep = s.DependsOn.Count == 0 ? "— (sin dependencias internas)" : string.Join(", ", s.DependsOn);
+            var dep = s.DependsOn.Count == 0 ? "(sin dependencias internas)" : string.Join(", ", s.DependsOn);
             sb.AppendLine($"| {i++} | {s.Level} | {Cell(s.Project)} | {Cell(s.TargetFramework)} | {Cell(dep)} |");
         }
         sb.AppendLine();

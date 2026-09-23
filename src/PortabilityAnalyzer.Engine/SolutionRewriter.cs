@@ -1498,9 +1498,9 @@ public sealed class SolutionRewriter
         IReadOnlyList<(int Level, string Name)> buildOrder, string? abstractionsName)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# {solutionName} — solución reescrita a multiplataforma");
+        sb.AppendLine($"# {solutionName}: solución reescrita a multiplataforma");
         sb.AppendLine();
-        sb.AppendLine("> **Cambios ya implementados** por la reescritura portable-first. La solución original NO se ha tocado;");
+        sb.AppendLine("> Cambios ya implementados por la reescritura library-first. La solución original no se ha tocado;");
         sb.AppendLine("> esta es una solución nueva, completa y separada. Este documento resume **lo que se ha hecho**.");
         sb.AppendLine();
 
@@ -1509,7 +1509,7 @@ public sealed class SolutionRewriter
         sb.AppendLine("| Proyecto original | Resultado | Proyectos generados | Ficheros núcleo | Ficheros Windows |");
         sb.AppendLine("|---|---|---|---:|---:|");
         foreach (var p in projects)
-            sb.AppendLine($"| {p.OriginalProject} | {p.Kind} — {p.Reason} | {string.Join(" + ", p.OutputProjects)} | {p.PortableFiles} | {p.WindowsFiles} |");
+            sb.AppendLine($"| {p.OriginalProject} | {p.Kind}: {p.Reason} | {string.Join(" + ", p.OutputProjects)} | {p.PortableFiles} | {p.WindowsFiles} |");
         sb.AppendLine();
         sb.AppendLine("- **Portable**: no tenía dependencias de Windows → quedó en un único proyecto `net8.0` (los ya `net8.0`,");
         sb.AppendLine("  p. ej. los `*Multi`, se copiaron sin cambios; los `net8.0-windows` sin dependencias reales se retargetearon).");
@@ -1554,7 +1554,7 @@ public sealed class SolutionRewriter
 
         if (seams.Count > 0)
         {
-            sb.AppendLine("## Seams aplicados (hecho): interfaz en el núcleo ↔ implementación Windows + DI");
+            sb.AppendLine("## Seams aplicados (hecho): interfaz en el núcleo, implementación Windows y DI");
             sb.AppendLine();
             sb.AppendLine("Cada fichero del núcleo que dependía de una clase de Windows se ha **desacoplado**: se extrajo su interfaz");
             sb.AppendLine("al núcleo, la clase Windows la implementa, y el consumidor recibe la interfaz por **inyección por constructor**.");
@@ -1597,7 +1597,7 @@ public sealed class SolutionRewriter
         sb.AppendLine("## Verificación sugerida");
         sb.AppendLine($"1. Abre `{solutionName}.sln` y **compila**: los núcleos `net8.0` compilan en cualquier SO; el código");
         sb.AppendLine("   Windows (WPF/Registro/P-Invoke…) compila en `net8.0-windows`.");
-        sb.AppendLine("2. El `CompositionRoot.Build()` (AddWindowsSeams) ya está generado y cableado en el arranque; complétalo");
+        sb.AppendLine("2. El `CompositionRoot.Build()` (AddPortableAbstractions + AddWindowsSeams) ya está generado y cableado en el arranque; complétalo");
         sb.AppendLine("   registrando tus servicios y el tipo raíz de la app.");
         sb.AppendLine("3. Añade un CI multiplataforma (matriz Windows + Linux) que compile los núcleos portables.");
         sb.AppendLine();

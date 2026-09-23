@@ -247,8 +247,8 @@ public sealed class WordReportExporter : IReportExporter
 
         b.Append(Para(T("Aislamiento por SO y equivalencias portables (ejemplos)", "OS isolation and portable equivalents (examples)"), bold: true, sizeHalfPt: 28));
         b.Append(Para(T(
-            "Ejemplos de código para cada tipo de dependencia detectada: la equivalencia portable o cómo aislar lo que hoy exige Windows (OperatingSystem.IsWindows() / #if), dejando el hueco preparado. No se desarrolla la implementación de otra plataforma.",
-            "Code examples for each detected dependency type: the portable equivalent or how to isolate what currently requires Windows (OperatingSystem.IsWindows() / #if), leaving the seam ready. The other platform's implementation is not developed here.")));
+            "Ejemplos de código para cada tipo de dependencia detectada: la equivalencia multiplataforma con librería/BCL, implementada en el propio código y transparente al SO. Solo si no existe una librería se aísla con OperatingSystem.IsWindows() / #if.",
+            "Code examples for each detected dependency type: the cross-platform equivalent with a library/BCL, implemented in the code itself and transparent to the OS. Only if no library exists is it isolated with OperatingSystem.IsWindows() / #if.")));
         foreach (var e in examples)
         {
             b.Append(Para(e.Titulo, bold: true, sizeHalfPt: 24));
@@ -391,7 +391,7 @@ public sealed class WordReportExporter : IReportExporter
             "Orden derivado de las referencias de proyecto (ProjectReference): cada proyecto se compila después de aquellos a los que referencia. Los proyectos del mismo nivel no dependen entre sí y podrían compilarse en paralelo.",
             "Order derived from project references (ProjectReference): each project builds after the ones it references. Projects on the same level do not depend on each other and could build in parallel.")));
 
-        var noDeps = T("— (sin dependencias internas)", "— (no internal dependencies)");
+        var noDeps = T("(sin dependencias internas)", "(no internal dependencies)");
         var i = 1;
         var rows = bo.Steps.Select(s => new[]
         {
