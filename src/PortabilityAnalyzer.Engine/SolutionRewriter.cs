@@ -471,9 +471,31 @@ public sealed class SolutionRewriter
             }
         }
 
+        // 4a-bis) Generate the REAL abstraction layer (<Base>.Abstractions): the interfaces the report recommends
+        // for the OS-specific categories present + a CROSS-PLATFORM default implementation of each + a DI extension.
+        // Every generated project references it, and the CompositionRoot registers the portable defaults.
+        string? abstractionsName = null;
+        var relevantCats = findings.Select(f => f.Categoria).Where(AbstractionsGenerator.IsRelevantCategory)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (relevantCats.Count > 0)
+        {
+            var baseName = solutionName.EndsWith("-multiplataforma", StringComparison.OrdinalIgnoreCase)
+                ? solutionName[..^"-multiplataforma".Length] : solutionName;
+            abstractionsName = SanitizeProjectName(baseName) + ".Abstractions";
+            var absDir = Path.Combine(outputDir, abstractionsName);
+            WriteGenerated(AbstractionsGenerator.Build(abstractionsName, relevantCats).Select(g => (g.Rel, g.Content)), absDir);
+            // Reference the abstraction layer from every already-emitted project so the interfaces are available.
+            foreach (var (_, relCsproj) in emitted)
+                InjectProjectReference(Path.Combine(outputDir, relCsproj), $"..\\{abstractionsName}\\{abstractionsName}.csproj");
+            emitted.Add((abstractionsName, $"{abstractionsName}\\{abstractionsName}.csproj"));
+            rewritten.Add(new RewrittenProject("(capa de abstracción)", "Abstracciones",
+                $"Generada con {relevantCats.Count} interfaz(es) portable(s) e implementación multiplataforma por defecto (DI): {string.Join(", ", relevantCats.OrderBy(c => c))}",
+                new[] { abstractionsName }, 0, 0));
+        }
+
         // 4b) DI wiring in generated code: in each entry-point project, generate a Composition Root that builds
-        // a ServiceCollection, calls AddWindowsSeams() for every seam-bearing Windows project it references and
-        // returns the provider; then try to invoke it from the actual entry point so it is verifiable.
+        // a ServiceCollection, registers the abstraction layer + AddWindowsSeams() for every seam-bearing Windows
+        // project it references and returns the provider; then invoke it from the entry point so it is verifiable.
         var seamWinProjects = seamResults.Where(kv => kv.Value.Seams.Count > 0)
             .Select(kv => kv.Key.WinName!).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var (outName, outDir, info) in entryPointOutputs)
@@ -487,9 +509,9 @@ public sealed class SolutionRewriter
                 if (w is not null && seamWinProjects.Contains(w)) reachable.Add(w);
             }
             reachable = reachable.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            if (reachable.Count == 0) continue; // no seams to register from this entry point
+            if (reachable.Count == 0 && abstractionsName is null) continue; // nothing to register from this entry point
 
-            WriteCompositionRoot(outDir, outName, reachable);
+            WriteCompositionRoot(outDir, outName, reachable, abstractionsName);
             EnsureDependencyInjectionPackage(outDir, outName);
             if (!TryInvokeCompositionRoot(outDir, outName))
                 warnings.Add($"'{outName}': se generó CompositionRoot.cs (AddWindowsSeams) pero no se pudo insertar " +
@@ -511,7 +533,7 @@ public sealed class SolutionRewriter
         // los .cs fuente viven en la carpeta de salida; si es muy profunda, VS puede fallar al cargarlos).
         WarnOnLongPaths(outputDir, warnings);
 
-        WriteMigrationReadme(Path.Combine(outputDir, "MIGRACION.md"), solutionName, rewritten, warnings, allSeams, buildOrder);
+        WriteMigrationReadme(Path.Combine(outputDir, "MIGRACION.md"), solutionName, rewritten, warnings, allSeams, buildOrder, abstractionsName);
 
         return new RewriteResult
         {
@@ -684,11 +706,12 @@ public sealed class SolutionRewriter
     /// <summary>Generates the Composition Root of an entry-point project: builds a ServiceCollection, registers
     /// the Windows seam implementations of every reachable seam-bearing Windows project (AddWindowsSeams) and
     /// returns the provider. This is the DI wiring done in the GENERATED code (not just documented).</summary>
-    private static void WriteCompositionRoot(string outDir, string nsName, IReadOnlyList<string> seamWinProjects)
+    private static void WriteCompositionRoot(string outDir, string nsName, IReadOnlyList<string> seamWinProjects, string? abstractionsName)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("// [Cross-platform rewrite] Composition Root: builds the DI container and registers the Windows");
-        sb.AppendLine("// implementations of the extracted seams. Call CompositionRoot.Build() at application startup.");
+        sb.AppendLine("// [Cross-platform rewrite] Composition Root: builds the DI container, registers the portable");
+        sb.AppendLine("// abstraction layer and the Windows implementations of the extracted seams. Call");
+        sb.AppendLine("// CompositionRoot.Build() at application startup.");
         sb.AppendLine("using System;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine();
@@ -696,10 +719,12 @@ public sealed class SolutionRewriter
         sb.AppendLine();
         sb.AppendLine("public static class CompositionRoot");
         sb.AppendLine("{");
-        sb.AppendLine("    /// <summary>Builds the DI container with the Windows implementations of the extracted seams.</summary>");
+        sb.AppendLine("    /// <summary>Builds the DI container with the portable abstraction defaults and the Windows seams.</summary>");
         sb.AppendLine("    public static IServiceProvider Build()");
         sb.AppendLine("    {");
         sb.AppendLine("        var services = new ServiceCollection();");
+        if (abstractionsName is not null)
+            sb.AppendLine($"        global::{abstractionsName}.AbstractionsRegistration.AddPortableAbstractions(services);");
         foreach (var p in seamWinProjects)
             sb.AppendLine($"        global::{p}.SeamRegistration.AddWindowsSeams(services);");
         sb.AppendLine("        // TODO: register your application services and root type here.");
@@ -724,6 +749,26 @@ public sealed class SolutionRewriter
         var idx = text.LastIndexOf("</Project>", StringComparison.Ordinal);
         text = idx >= 0 ? text[..idx] + block + text[idx..] : text + Environment.NewLine + block;
         File.WriteAllText(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>Removes characters that are not valid in a project/assembly name (whitespace) so the abstraction
+    /// project name derived from the solution name is well-formed.</summary>
+    private static string SanitizeProjectName(string name) =>
+        new string(name.Where(c => !char.IsWhiteSpace(c)).ToArray());
+
+    /// <summary>Adds a &lt;ProjectReference&gt; to a generated .csproj (idempotent), so every project can consume
+    /// the generated abstraction layer.</summary>
+    private static void InjectProjectReference(string csprojPath, string includeRel)
+    {
+        if (!File.Exists(csprojPath)) return;
+        var text = File.ReadAllText(csprojPath);
+        if (text.Contains($"Include=\"{includeRel}\"", StringComparison.OrdinalIgnoreCase)) return;
+        var block = "  <ItemGroup>" + Environment.NewLine +
+                    $"    <ProjectReference Include=\"{includeRel}\" />" + Environment.NewLine +
+                    "  </ItemGroup>" + Environment.NewLine + Environment.NewLine;
+        var idx = text.LastIndexOf("</Project>", StringComparison.Ordinal);
+        text = idx >= 0 ? text[..idx] + block + text[idx..] : text + Environment.NewLine + block;
+        File.WriteAllText(csprojPath, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
     /// <summary>Best-effort: inserts a call to the generated CompositionRoot.Build() at the start of the entry
@@ -1450,7 +1495,7 @@ public sealed class SolutionRewriter
 
     private static void WriteMigrationReadme(string path, string solutionName, IReadOnlyList<RewrittenProject> projects,
         IReadOnlyList<string> warnings, IReadOnlyList<(string Project, string Concrete, string Interface, string Namespace)> seams,
-        IReadOnlyList<(int Level, string Name)> buildOrder)
+        IReadOnlyList<(int Level, string Name)> buildOrder, string? abstractionsName)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {solutionName} — solución reescrita a multiplataforma");
@@ -1483,6 +1528,29 @@ public sealed class SolutionRewriter
         sb.AppendLine("- Los **paquetes NuGet solo-Windows** (EventLog, Registry, ProtectedData…) se dejaron solo en los `.Windows`.");
         sb.AppendLine("- Las **referencias a proyectos externos** a la solución se conservaron apuntando a su `.csproj` original.");
         sb.AppendLine();
+
+        if (abstractionsName is not null)
+        {
+            sb.AppendLine("## Capa de abstracción generada (hecho)");
+            sb.AppendLine();
+            sb.AppendLine($"Se ha **generado el proyecto `{abstractionsName}`** (`net8.0`, portable) con las **interfaces** de las");
+            sb.AppendLine("capacidades que dependen del SO y una **implementación multiplataforma por defecto** de cada una (funciona");
+            sb.AppendLine("en Windows y Linux), registradas por **inyección de dependencias**. Todos los proyectos generados lo");
+            sb.AppendLine("referencian, y el `CompositionRoot.Build()` llama a `AddPortableAbstractions()`.");
+            sb.AppendLine();
+            sb.AppendLine("| Interfaz | Implementación por defecto (portable) | Sustituir por (opcional) |");
+            sb.AppendLine("|---|---|---|");
+            sb.AppendLine("| `ISettingsStore` | `EnvironmentSettingsStore` (variables de entorno) | `Microsoft.Extensions.Configuration` (appsettings.json) |");
+            sb.AppendLine("| `IUserIdentity` / `IAuthenticationService` | `EnvironmentUserIdentity` (`Environment.UserName`) | LDAP (`System.DirectoryServices.Protocols`) |");
+            sb.AppendLine("| `IProcessRunner` | `ProcessRunner` (`System.Diagnostics.Process`) | — |");
+            sb.AppendLine("| `INativePlatform` | `PortableNativePlatform` (BCL gestionado) | librería nativa multiplataforma según necesidad |");
+            sb.AppendLine("| `IInterProcessLock` | `MutexInterProcessLock` (Mutex con nombre) | bloqueo por fichero / mecanismo del SO |");
+            sb.AppendLine("| `IUserNotifier` | `ConsoleUserNotifier` (consola) | diálogo WPF/WinForms en la app Windows |");
+            sb.AppendLine();
+            sb.AppendLine("> Solo se generan las interfaces de las categorías detectadas en la solución. Cambia cualquier");
+            sb.AppendLine("> implementación registrando la tuya en el contenedor DI después de `AddPortableAbstractions()`.");
+            sb.AppendLine();
+        }
 
         if (seams.Count > 0)
         {

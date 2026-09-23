@@ -84,7 +84,6 @@ public sealed class ExecTexts
     // Recomendación
     public required string HRecommendation { get; init; }
     public required string RecoPara1 { get; init; }
-    public required string RecoPara2 { get; init; }
 
     // -------------------------------------------------------------------------------------------
 
@@ -172,12 +171,6 @@ public sealed class ExecTexts
                     "Windows y Linux, sin dejar nada para otro equipo). La única excepción es la GUI WPF, que no se migra: en " +
                     "Linux se construyen solo las clases y métodos, no la capa gráfica. Priorizar la resolución de los puntos " +
                     "bloqueantes y de los proyectos marcados como obligatorios.",
-        RecoPara2 = "Un seam (o punto de unión/corte) no es propiamente una capa física de la aplicación, sino un lugar en " +
-                    "el código donde puedes alterar el comportamiento del programa sin modificar el código fuente de ese " +
-                    "lugar, el punto de extensión —una interfaz— por el que el núcleo portable llama a una capacidad que " +
-                    "depende del sistema operativo, sin conocer su implementación. Cada plataforma (Windows, y en el futuro " +
-                    "otras) aporta su propia implementación de esa interfaz; así el núcleo se mantiene portable y lo " +
-                    "específico de cada SO queda encapsulado y sustituible.",
     };
 
     public static readonly ExecTexts English = new()
@@ -264,11 +257,6 @@ public sealed class ExecTexts
                     "leaving nothing for another team). The only exception is the WPF GUI, which is not migrated: on Linux only " +
                     "the classes and methods are built, not the graphical layer. Prioritize resolving the blocking points and " +
                     "the projects marked as mandatory.",
-        RecoPara2 = "A seam is not really a physical layer of the application, but a place in the code where you can alter " +
-                    "the program's behavior without modifying the source code at that place: the extension point —an " +
-                    "interface— through which the portable core calls an OS-dependent capability without knowing its " +
-                    "implementation. Each platform (Windows, and others in the future) provides its own implementation of " +
-                    "that interface; thus the core stays portable and the OS-specific parts remain encapsulated and replaceable.",
     };
 
     private static string CategoryEs(string cat) => cat switch

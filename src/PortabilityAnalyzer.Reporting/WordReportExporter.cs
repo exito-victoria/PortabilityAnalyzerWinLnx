@@ -181,9 +181,6 @@ public sealed class WordReportExporter : IReportExporter
         b.Append(Para(T(
             $"Objetivo: código .NET 8 multiplataforma usando librerías/NuGets portables, de forma transparente al SO (la misma clase funciona en Windows y Linux, sin dejar nada para otro equipo). Única excepción: la GUI WPF, que no se migra (en Linux solo se construyen las clases y métodos, no la capa gráfica). Esfuerzo total estimado (con Pruebas y CI): {N(plan.TotalWithTesting.Media)} h (optimista {N(plan.TotalWithTesting.Optimista)} / pesimista {N(plan.TotalWithTesting.Pesimista)}). Bloqueantes: {plan.Blockers}.",
             $"Goal: cross-platform .NET 8 code using portable libraries/NuGets, transparently to the OS (the same class runs on Windows and Linux, leaving nothing for another team). Only exception: the WPF GUI, which is not migrated (on Linux only the classes and methods are built, not the graphical layer). Total estimated effort (with Testing & CI): {N(plan.TotalWithTesting.Media)} h (optimistic {N(plan.TotalWithTesting.Optimista)} / pessimistic {N(plan.TotalWithTesting.Pesimista)}). Blocking points: {plan.Blockers}.")));
-        b.Append(Para(T(
-            "Qué es un «seam» (costura): el punto de extensión —una interfaz— por el que el núcleo portable llama a una capacidad que depende del sistema operativo, sin conocer su implementación. Cada plataforma aporta su propia implementación de esa interfaz; así el núcleo se mantiene portable y lo específico de cada SO queda encapsulado y sustituible.",
-            "What is a \"seam\": the extension point —an interface— through which the portable core calls an OS-dependent capability without knowing its implementation. Each platform provides its own implementation of that interface; thus the core stays portable and the OS-specific parts are encapsulated and replaceable.")));
 
         if (plan.RoleNotes.Count > 0)
         {

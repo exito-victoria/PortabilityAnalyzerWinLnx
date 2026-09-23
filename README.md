@@ -200,10 +200,18 @@ Qué hace, ya **implementado** (no son TODOs):
   **mismo proyecto** de forma inyectable, se extrae una **interfaz** al `.Core`, la clase Windows la implementa y
   se genera el registro DI `SeamRegistration.AddWindowsSeams()` en `.Windows`. Cada fichero que aún requiera una
   reescritura manual lleva una **marca `[PORTAR]`** con la línea, el símbolo y la alternativa recomendada.
+- **Capa de abstracción generada (interfaces reales, no solo documentadas)**: si la solución usa capacidades
+  dependientes del SO que se resuelven tras una interfaz, se **genera el proyecto `<Solución>.Abstractions`**
+  (`net8.0`, portable) con las interfaces necesarias **y una implementación multiplataforma por defecto de cada
+  una** (funciona en Windows y Linux), registradas por DI (`AddPortableAbstractions`). Se genera solo lo que
+  aparece en la solución: `ISettingsStore` (Registro→variables de entorno/appsettings), `IUserIdentity` /
+  `IAuthenticationService` (identidad), `IProcessRunner` (`System.Diagnostics.Process`), `INativePlatform`
+  (equivalentes gestionados del BCL), `IInterProcessLock` (Mutex con nombre) e `IUserNotifier` (consola por
+  defecto; diálogo en la app Windows). Todos los proyectos generados la referencian.
 - **Cableado DI hecho en el código generado**: en el proyecto de arranque se genera un `CompositionRoot.Build()`
-  (crea el `ServiceCollection`, llama a `AddWindowsSeams()` de cada `.Windows` con seams y devuelve el proveedor)
-  y se **invoca desde el punto de entrada** (si es WPF con `Main` autogenerado, deja un aviso indicando dónde
-  llamarlo). Así el registro por inyección de dependencias queda **verificable**, no solo documentado.
+  (crea el `ServiceCollection`, llama a `AddPortableAbstractions()` de la capa de abstracción y a `AddWindowsSeams()`
+  de cada `.Windows` con seams, y devuelve el proveedor) y se **invoca desde el punto de entrada** (si es WPF con
+  `Main` autogenerado, deja un aviso indicando dónde llamarlo). Así el registro por DI queda **verificable**.
 - **Referencias recableadas**: `.Core` solo referencia núcleos portables; `.Windows` referencia su `.Core` y las
   partes `.Windows`; los **proyectos externos** a la solución se conservan apuntando a su `.csproj` original; los
   **excluidos** referencian el lado `.Windows` (superset).

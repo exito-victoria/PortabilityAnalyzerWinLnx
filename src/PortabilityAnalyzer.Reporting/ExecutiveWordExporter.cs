@@ -217,7 +217,6 @@ public sealed class ExecutiveWordExporter : IReportExporter
     {
         b.Append(Heading(_t.HRecommendation, 1));
         b.Append(Para(_t.RecoPara1));
-        b.Append(Para(_t.RecoPara2));
     }
 
     // --- Infraestructura Word (autocontenida, agnostica del idioma) ---
