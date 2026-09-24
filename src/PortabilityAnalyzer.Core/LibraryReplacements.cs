@@ -11,6 +11,23 @@ public enum LibraryStatus
     Revisar
 }
 
+/// <summary>
+/// Whether a referenced package is actually consumed by the code. Computed conservatively by
+/// <c>LibraryUsageAnalyzer</c>: a package is only flagged as a removal candidate with positive evidence
+/// of non-use, never on a doubt (reflection/DI usage can hide a real dependency).
+/// </summary>
+public enum LibraryUsage
+{
+    /// <summary>The package's assembly is referenced by the compiled IL, or its namespace appears in source.</summary>
+    Usada,
+    /// <summary>Built output resolved and the package's assembly is NOT referenced anywhere: candidate to remove (verify manually).</summary>
+    CandidataARevisar,
+    /// <summary>Development-only dependency (analyzer, test SDK, PrivateAssets): not referenced at runtime by design; not removable on that basis.</summary>
+    SoloBuild,
+    /// <summary>Could not be verified (project not built, package not restored, or a framework/meta package): treated as in-use to stay safe.</summary>
+    NoVerificable
+}
+
 /// <summary>A library referenced by the solution/project and its cross-platform equivalent.</summary>
 public sealed record ReferencedLibrary(
     string Package,
@@ -19,7 +36,20 @@ public sealed record ReferencedLibrary(
     string? Replacement,          // replacement package (when applicable)
     string? ReplacementVersion,
     string NotaEs,
-    string NotaEn);
+    string NotaEn)
+{
+    // --- Real-usage validation (additive; defaults keep older JSON/behaviour valid). ---
+
+    /// <summary>Whether the package is actually consumed by the code (see <see cref="LibraryUsage"/>).</summary>
+    public LibraryUsage Usage { get; init; } = LibraryUsage.NoVerificable;
+
+    /// <summary>First-party projects (.csproj) that declare this PackageReference.</summary>
+    public IReadOnlyList<string> Projects { get; init; } = new List<string>();
+
+    /// <summary>Bilingual, human-facing evidence for the usage verdict (which assembly/namespace, in which project).</summary>
+    public string? UsageEvidenceEs { get; init; }
+    public string? UsageEvidenceEn { get; init; }
+}
 
 /// <summary>
 /// CURATED catalog of Windows-only libraries and their cross-platform equivalent (replacement package,
@@ -46,6 +76,21 @@ public static class LibraryReplacements
     //   Multiplataforma = already cross-platform; no change required.
     private static readonly Entry[] Table =
     {
+        // --- SPECIFIC overrides: must precede the prefix rules below (Lookup returns the FIRST match) ---
+        // System.DirectoryServices.Protocols IS cross-platform (LDAP at the protocol level), unlike the rest of
+        // the System.DirectoryServices.* family. Source: learn.microsoft.com/dotnet/core/porting + dotnet/runtime#84831.
+        new("System.DirectoryServices.Protocols", false, LibraryStatus.Multiplataforma, null, null, null, null,
+            "Ya multiplataforma (LDAP a nivel de protocolo; funciona en Linux).",
+            "Already cross-platform (LDAP at the protocol level; works on Linux)."),
+        // AccountManagement lanza PlatformNotSupportedException fuera de Windows. Source: dotnet/runtime#84831.
+        new("System.DirectoryServices.AccountManagement", false, LibraryStatus.Revisar, "System.DirectoryServices.Protocols", "8.0.0", null, null,
+            "AccountManagement lanza PlatformNotSupportedException en Linux. Reescribir sobre System.DirectoryServices.Protocols o Novell.Directory.Ldap.NETStandard (multiplataforma) tras IUserIdentity.",
+            "AccountManagement throws PlatformNotSupportedException on Linux. Rewrite on System.DirectoryServices.Protocols or Novell.Directory.Ldap.NETStandard (cross-platform) behind IUserIdentity."),
+        // PdfSharpCore es el port multiplataforma de PdfSharp; debe ganar al prefijo "PdfSharp" de abajo.
+        new("PdfSharpCore", false, LibraryStatus.Multiplataforma, null, null, null, null,
+            "Ya multiplataforma (port de PdfSharp sin GDI+).",
+            "Already cross-platform (PdfSharp port without GDI+)."),
+
         // --- Windows-only WITH a drop-in replacement (package + 1:1 namespace swap) ---
         new("Oracle.DataAccess", false, LibraryStatus.Reemplazar, "Oracle.ManagedDataAccess.Core", "23.5.1",
             "Oracle.DataAccess.Client", "Oracle.ManagedDataAccess.Client",
@@ -140,6 +185,61 @@ public static class LibraryReplacements
         new("CrystalDecisions", true, LibraryStatus.Revisar, "QuestPDF", "2024.10.0", null, null,
             "Crystal Reports (solo Windows). Usar QuestPDF, iText o el motor de informes que aplique (multiplataforma).",
             "Crystal Reports (Windows only). Use QuestPDF, iText or a suitable reporting engine (cross-platform)."),
+        // Source: learn.microsoft.com/dotnet/core/porting/windows-compat-pack (~mitad de las APIs son solo-Windows).
+        new("Microsoft.Windows.Compatibility", false, LibraryStatus.Revisar, null, null, null, null,
+            "Meta-paquete de compatibilidad: ~la mitad de sus APIs son solo-Windows (Registro, WMI, EventLog...) y lanzan PlatformNotSupportedException. Revisar con el Platform Compatibility Analyzer y sustituir cada API solo-Windows por su equivalente portable.",
+            "Compatibility meta-package: ~half of its APIs are Windows-only (Registry, WMI, EventLog...) and throw PlatformNotSupportedException. Review with the Platform Compatibility Analyzer and replace each Windows-only API with its portable equivalent."),
+        // Source: dotnet/runtime#91729 (sin equivalente en netstandard; depende de System.Security.Principal.Windows).
+        new("System.IO.FileSystem.AccessControl", false, LibraryStatus.Revisar, null, null, null, null,
+            "ACLs de ficheros de Windows (solo Windows). En Linux usar permisos POSIX (Unix file mode) tras una interfaz por SO.",
+            "Windows file ACLs (Windows only). On Linux use POSIX permissions (Unix file mode) behind a per-OS interface."),
+        // Source: nuget.org/packages/WindowsAPICodePack-Shell + Microsoft Q&A 1345619 (solo Windows, sin mantener).
+        new("WindowsAPICodePack", true, LibraryStatus.Revisar, null, null, null, null,
+            "Windows API Code Pack (shell/tareas de Windows, solo Windows y sin mantenimiento). Aislar tras una interfaz; sin equivalente multiplataforma directo.",
+            "Windows API Code Pack (Windows shell/taskbar, Windows only and unmaintained). Isolate behind an interface; no direct cross-platform equivalent."),
+        new("Microsoft-WindowsAPICodePack", true, LibraryStatus.Revisar, null, null, null, null,
+            "Windows API Code Pack (shell/tareas de Windows, solo Windows). Aislar tras una interfaz; sin equivalente multiplataforma directo.",
+            "Windows API Code Pack (Windows shell/taskbar, Windows only). Isolate behind an interface; no direct cross-platform equivalent."),
+        // PdfSharp clásico (build GDI+). El prefijo cae DESPUÉS del override exacto de PdfSharpCore de arriba.
+        new("PdfSharp", true, LibraryStatus.Revisar, "PdfSharpCore", "1.3.67", null, null,
+            "PdfSharp clásico (build GDI+, atado a System.Drawing en Windows). Usar PdfSharpCore o el build Core de PDFsharp 6 (multiplataforma).",
+            "Classic PdfSharp (GDI+ build, tied to System.Drawing on Windows). Use PdfSharpCore or the PDFsharp 6 Core build (cross-platform)."),
+
+        // --- WPF/WinForms UI toolkits: la GUI de escritorio solo corre en Windows (excepción GUI del objetivo).
+        //     No se migran; en Linux se construyen solo las clases/métodos, no la capa gráfica. ---
+        new("MahApps.Metro", true, LibraryStatus.Revisar, null, null, null, null,
+            "Framework de UI para WPF (solo Windows). Forma parte de la capa gráfica, que no se migra (excepción GUI).",
+            "UI framework for WPF (Windows only). Part of the graphical layer, which is not migrated (GUI exception)."),
+        new("MaterialDesignThemes", true, LibraryStatus.Revisar, null, null, null, null,
+            "Tema Material Design para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Material Design theme for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("MaterialDesignColors", true, LibraryStatus.Revisar, null, null, null, null,
+            "Paleta de Material Design para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Material Design palette for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Extended.Wpf.Toolkit", true, LibraryStatus.Revisar, null, null, null, null,
+            "Controles extendidos para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Extended controls for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Fluent.Ribbon", true, LibraryStatus.Revisar, null, null, null, null,
+            "Ribbon para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Ribbon control for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("ControlzEx", true, LibraryStatus.Revisar, null, null, null, null,
+            "Utilidades de UI para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "WPF UI helpers (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Xceed.Wpf", true, LibraryStatus.Revisar, null, null, null, null,
+            "Controles Xceed para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Xceed WPF controls (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("DevExpress", true, LibraryStatus.Revisar, null, null, null, null,
+            "Suite DevExpress de escritorio (WPF/WinForms, solo Windows). Capa gráfica; para lógica reutilizable, aislarla del control visual.",
+            "DevExpress desktop suite (WPF/WinForms, Windows only). Graphical layer; for reusable logic, isolate it from the visual control."),
+        new("Telerik.Windows", true, LibraryStatus.Revisar, null, null, null, null,
+            "Suite Telerik para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Telerik suite for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Telerik.WinControls", true, LibraryStatus.Revisar, null, null, null, null,
+            "Suite Telerik para WinForms (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Telerik suite for WinForms (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Infragistics", true, LibraryStatus.Revisar, null, null, null, null,
+            "Suite Infragistics de escritorio (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Infragistics desktop suite (Windows only). Graphical layer; not migrated (GUI exception)."),
 
         // --- Known CROSS-PLATFORM (no change required) ---
         new("Oracle.ManagedDataAccess.Core", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
@@ -180,6 +280,53 @@ public static class LibraryReplacements
         new("NUnit", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("Moq", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("FluentAssertions", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Shouldly", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("xunit", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("coverlet", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+
+        // MVVM / patrones de presentación agnósticos de UI (funcionan sin la GUI).
+        // Source: github.com/CommunityToolkit/dotnet (UI-agnóstico, netstandard2.0/2.1/net6).
+        new("CommunityToolkit.Mvvm", false, LibraryStatus.Multiplataforma, null, null, null, null,
+            "Ya multiplataforma (MVVM agnóstico de UI; netstandard2.0).", "Already cross-platform (UI-agnostic MVVM; netstandard2.0)."),
+        new("CommunityToolkit.Diagnostics", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("CommunityToolkit.HighPerformance", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("ReactiveUI", false, LibraryStatus.Multiplataforma, null, null, null, null,
+            "Núcleo multiplataforma (los adaptadores ReactiveUI.WPF/WinForms sí son de UI Windows).",
+            "Cross-platform core (the ReactiveUI.WPF/WinForms adapters are Windows UI)."),
+
+        // Contenedores de inyección de dependencias (todos multiplataforma).
+        new("Autofac", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Ninject", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("SimpleInjector", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Castle.Core", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Castle.Windsor", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+
+        // Hilos / sincronización / programación reactiva (BCL y librerías, todo multiplataforma).
+        new("System.Reactive", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Nito.AsyncEx", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("System.Threading.Tasks.Dataflow", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("System.Threading.Channels", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+
+        // Gráficas portables (alternativa a las de WinForms/WPF). OxyPlot.Core/LiveChartsCore son multiplataforma;
+        // sus renderizadores WPF sí son de Windows.
+        new("OxyPlot.Core", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (el renderizador WPF sí es de Windows).", "Already cross-platform (the WPF renderer is Windows)."),
+        new("LiveChartsCore", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (el renderizador WPF sí es de Windows).", "Already cross-platform (the WPF renderer is Windows)."),
+
+        // Excel / PDF portables. Source: epplussoftware.com (v5+ sin System.Drawing en Linux), github.com/ststeiger/PdfSharpCore.
+        new("EPPlus", true, LibraryStatus.Multiplataforma, null, null, null, null,
+            "Ya multiplataforma (v5+ sin dependencia de System.Drawing.Common en Linux; licencia Polyform no comercial).",
+            "Already cross-platform (v5+ with no System.Drawing.Common dependency on Linux; Polyform noncommercial license)."),
+
+        // HTTP / gRPC / serialización.
+        new("Flurl", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Grpc", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Google.Protobuf", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Microsoft.Data.Sqlite", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+
+        // Utilidades varias multiplataforma de uso frecuente.
+        new("System.CommandLine", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Humanizer", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("HtmlAgilityPack", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
     };
 
     /// <summary>Finds the catalog entry for a package (exact or prefix match). Null if not present.</summary>

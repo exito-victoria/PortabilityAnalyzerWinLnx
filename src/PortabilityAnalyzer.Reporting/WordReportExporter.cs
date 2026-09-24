@@ -358,14 +358,21 @@ public sealed class WordReportExporter : IReportExporter
 
         b.Append(Para(T("Librerías referenciadas y equivalente multiplataforma", "Referenced libraries and cross-platform equivalent"), bold: true, sizeHalfPt: 28));
         b.Append(Para(T(
-            "Paquetes NuGet referenciados en la solución/proyecto. Estado: Multiplataforma (sin cambios), Reemplazar (usar el paquete indicado) o Revisar (sin reemplazo directo: reescritura manual con la guía).",
-            "NuGet packages referenced by the solution/project. Status: Cross-platform (no change), Replace (use the given package) or Review (no drop-in replacement: manual rewrite following the guidance).")));
+            "Paquetes NuGet referenciados en la solución/proyecto analizado. Estado: Multiplataforma (sin cambios), Reemplazar (usar el paquete indicado) o Revisar (sin reemplazo directo: reescritura manual con la guía). Uso: validado contra el código (IL de la salida compilada y using del fuente): Usada, Candidata a revisar (referenciada pero sin uso detectado: verificar reflexión/DI antes de quitar), Solo build (analizador/pruebas) o No verificable (proyecto sin compilar o paquete no restaurado).",
+            "NuGet packages referenced by the analyzed solution/project. Status: Cross-platform (no change), Replace (use the given package) or Review (no drop-in replacement: manual rewrite following the guidance). Usage: validated against the code (IL of the compiled output and source using directives): Used, Review candidate (referenced but no detected use: verify reflection/DI before removing), Build-only (analyzer/tests) or Unverifiable (project not built or package not restored).")));
 
         string Estado(LibraryStatus s) => s switch
         {
             LibraryStatus.Multiplataforma => T("Multiplataforma", "Cross-platform"),
             LibraryStatus.Reemplazar => T("Reemplazar", "Replace"),
             _ => T("Revisar", "Review")
+        };
+        string Uso(LibraryUsage u) => u switch
+        {
+            LibraryUsage.Usada => T("Usada", "Used"),
+            LibraryUsage.CandidataARevisar => T("Candidata a revisar", "Review candidate"),
+            LibraryUsage.SoloBuild => T("Solo build", "Build-only"),
+            _ => T("No verificable", "Unverifiable")
         };
         var rows = libs
             .OrderBy(l => l.Status).ThenBy(l => l.Package, StringComparer.OrdinalIgnoreCase)
@@ -375,12 +382,21 @@ public sealed class WordReportExporter : IReportExporter
                 l.Version ?? "—",
                 Estado(l.Status),
                 l.Replacement is null ? "—" : (l.ReplacementVersion is null ? l.Replacement : $"{l.Replacement} {l.ReplacementVersion}"),
-                T(l.NotaEs, l.NotaEn)
+                Uso(l.Usage),
+                l.Projects.Count > 0 ? string.Join(", ", l.Projects) : "—",
+                T(l.UsageEvidenceEs is null ? l.NotaEs : $"{l.NotaEs} {l.UsageEvidenceEs}",
+                  l.UsageEvidenceEn is null ? l.NotaEn : $"{l.NotaEn} {l.UsageEvidenceEn}")
             });
         b.Append(BuildTable(
-            new[] { T("Paquete", "Package"), T("Versión", "Version"), T("Estado", "Status"), T("Reemplazo multiplataforma", "Cross-platform replacement"), T("Nota", "Note") },
-            new[] { 2.4, 1.0, 1.1, 2.4, 4.1 },
+            new[] { T("Paquete", "Package"), T("Versión", "Version"), T("Estado", "Status"), T("Reemplazo multiplataforma", "Cross-platform replacement"), T("Uso", "Usage"), T("Proyectos", "Projects"), T("Nota", "Note") },
+            new[] { 2.1, 0.9, 1.0, 2.1, 1.3, 1.8, 2.8 },
             rows));
+
+        var candidatas = libs.Where(l => l.Usage == LibraryUsage.CandidataARevisar).ToList();
+        if (candidatas.Count > 0)
+            b.Append(Para(T(
+                $"Candidatas a quitar ({candidatas.Count}): {string.Join(", ", candidatas.Select(l => l.Package))}. Referenciadas en el .csproj pero sin uso detectado en el código; confirmar que no se resuelven por reflexión o inyección de dependencias antes de eliminarlas.",
+                $"Removal candidates ({candidatas.Count}): {string.Join(", ", candidatas.Select(l => l.Package))}. Referenced in the .csproj but with no detected use in the code; confirm they are not resolved via reflection or dependency injection before removing them."), bold: true));
         b.Append(Para(string.Empty));
     }
 

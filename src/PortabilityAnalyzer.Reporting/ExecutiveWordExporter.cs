@@ -60,6 +60,7 @@ public sealed class ExecutiveWordExporter : IReportExporter
         AppendEstimacionPorProyecto(b, report, managed, ourBlockers);
         AppendCostePorBloque(b, report);
         AppendHallazgosPrincipales(b, report);
+        AppendLibrerias(b, report);
         AppendRestricciones(b, report, managed);
         AppendRecomendacion(b);
 
@@ -190,6 +191,37 @@ public sealed class ExecutiveWordExporter : IReportExporter
             new[] { _t.ColDependencyType, _t.ColUses },
             new[] { 4.0, 1.5 },
             top.Select(x => new[] { _t.Category(x.Cat), x.Count.ToString() })));
+    }
+
+    /// <summary>Resumen ejecutivo del inventario de librerías: cuántas referenciadas, cuántas ya multiplataforma,
+    /// a reemplazar, a revisar, usadas y candidatas a quitar (uso validado contra el código).</summary>
+    private void AppendLibrerias(Body b, AnalysisReport report)
+    {
+        var libs = report.ReferencedLibraries;
+        if (libs.Count == 0) return;
+
+        b.Append(Heading(_t.HLibraries, 1));
+        b.Append(Para(_t.LibrariesIntro));
+
+        var multi = libs.Count(l => l.Status == LibraryStatus.Multiplataforma);
+        var reemplazar = libs.Count(l => l.Status == LibraryStatus.Reemplazar);
+        var revisar = libs.Count(l => l.Status == LibraryStatus.Revisar);
+        var usadas = libs.Count(l => l.Usage == LibraryUsage.Usada);
+        var candidatas = libs.Where(l => l.Usage == LibraryUsage.CandidataARevisar).ToList();
+
+        var rows = new List<string[]>
+        {
+            new[] { _t.LibReferenced, libs.Count.ToString() },
+            new[] { _t.LibCrossPlatform, multi.ToString() },
+            new[] { _t.LibReplace, reemplazar.ToString() },
+            new[] { _t.LibReview, revisar.ToString() },
+            new[] { _t.LibUsed, usadas.ToString() },
+            new[] { _t.LibRemovalCandidates, candidatas.Count.ToString() },
+        };
+        b.Append(BuildTable(new[] { _t.ColMetric, _t.ColValue }, new[] { 4.0, 1.5 }, rows));
+
+        if (candidatas.Count > 0)
+            b.Append(Para(_t.LibCandidatesNote(candidatas.Count, string.Join(", ", candidatas.Select(l => l.Package)))));
     }
 
     private void AppendRestricciones(Body b, AnalysisReport report, List<AssemblyAnalysisResult> managed)
