@@ -104,9 +104,10 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
 
 - **General** (Markdown y **Word en español e inglés** — `informe.docx` e `informe_EN.docx`): resumen, **coste por bloque**, **orden de compilación** (con Target Framework),
   **recomendación de arquitectura** con un **ejemplo de migración** real y la definición de «seam»,
-  **análisis de terceros**, **terceros no modificables** (restricción + opciones), **librerías referenciadas y su
-  equivalente multiplataforma** (reemplazo directo, o **alternativa propuesta** cuando el estado es "revisar";
-  catálogo curado a partir de guías de Microsoft), **impacto por proyecto**
+  **análisis de terceros**, **terceros no modificables** (restricción + opciones), **inventario de librerías y NuGets
+  referenciados y su equivalente multiplataforma** (reemplazo directo, o **alternativa propuesta** cuando el estado es
+  "revisar"; catálogo curado a partir de guías de Microsoft) **con validación de uso real contra el código** (ver abajo),
+  **impacto por proyecto**
   (clases y ficheros afectados), **análisis de código fuente** (dónde y cómo corregir) y un **apéndice de
   equivalencias portables / aislamiento por SO** con fragmentos de código. El Word incluye **Tabla de
   contenido** (con estilos de título) y **repite las cabeceras** de tabla al partir en páginas.
@@ -114,11 +115,40 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
   (`InformeEjec_<proyecto>.docx` e `InformeEjec_<proyecto>_EN.docx`) — resumen, cifras clave, **estimación por
   proyecto** distinguiendo Proyecto propio de **DLL de terceros** (con su autor), coste por bloque
   (optimista primero), hallazgos principales, restricciones y recomendación.
-- **JSON**: contrato para integraciones (se **mantiene** estable; los cambios solo añaden).
+- **JSON**: contrato para integraciones (se **mantiene** estable; los cambios solo añaden). El inventario de
+  librerías incluye los campos aditivos `Usage`, `Projects`, `UsageEvidenceEs/En`.
 
 La estimación es **PERT** a tres puntos (O = optimista, M = más probable, P = pesimista; media = valor
 esperado); el esfuerzo se cuenta una vez por regla y ensamblado, con factor de incertidumbre para terceros
 y un bucket transversal de **Pruebas y CI**.
+
+## Inventario de librerías y NuGets (uso real y portabilidad)
+
+Se extrae de la **solución/proyecto que se analiza** (nunca del analizador). Por cada `PackageReference`
+distinto de sus `.csproj` (resolviendo la versión también desde **Central Package Management**,
+`Directory.Packages.props`), la tabla del informe da:
+
+- **Estado multiplataforma** (catálogo curado `LibraryReplacements`): *Multiplataforma* (sin cambios),
+  *Reemplazar* (paquete equivalente indicado, con versión) o *Revisar* (sin reemplazo directo: alternativa propuesta).
+- **Uso real validado contra el código**, con dos señales:
+  1. el **IL de la salida compilada** (`bin`) de cada proyecto, leído con Mono.Cecil (qué ensamblados referencia de verdad), y
+  2. las directivas **`using`** del código fuente.
+  El puente paquete → ensamblados/namespaces que aporta se resuelve desde la **caché global de NuGet**
+  (`%USERPROFILE%\.nuget\packages`), porque el Id del paquete no siempre coincide con el nombre del ensamblado
+  (p. ej. `Oracle.ManagedDataAccess.Core` aporta `Oracle.ManagedDataAccess.dll`).
+- **Proyectos** que declaran el paquete y **evidencia** del veredicto.
+
+Valores de uso (criterio **conservador**: solo se propone quitar con evidencia positiva de no-uso):
+
+| Uso | Significado |
+|-----|-------------|
+| **Usada** | Su ensamblado aparece en el IL de la salida, o su namespace en el fuente. |
+| **Candidata a revisar** | Referenciada, con salida compilada disponible, pero sin uso detectado. Candidata a quitar; **verificar reflexión/DI** antes de eliminarla. |
+| **Solo build** | Analizador / SDK de pruebas / `PrivateAssets`: no se referencia en runtime por diseño (no eliminable por ese motivo). |
+| **No verificable** | Proyecto sin compilar, paquete no restaurado o meta/FrameworkReference. Se asume en uso por prudencia. |
+
+> Requiere la solución **compilada** (para leer el IL de `bin`) y los paquetes **restaurados** (caché de NuGet)
+> para el mayor nivel de certeza; sin ellos, los paquetes quedan como *No verificable* (nunca se marcan como quitables).
 
 ## Generador de división de proyectos (split)
 

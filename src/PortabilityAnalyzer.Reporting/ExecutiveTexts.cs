@@ -74,6 +74,17 @@ public sealed class ExecTexts
     public required string ColUses { get; init; }
     public required Func<string, string> Category { get; init; }
 
+    // Librerías / dependencias
+    public required string HLibraries { get; init; }
+    public required string LibrariesIntro { get; init; }
+    public required string LibReferenced { get; init; }
+    public required string LibCrossPlatform { get; init; }
+    public required string LibReplace { get; init; }
+    public required string LibReview { get; init; }
+    public required string LibUsed { get; init; }
+    public required string LibRemovalCandidates { get; init; }
+    public required Func<int, string, string> LibCandidatesNote { get; init; } // nº, lista de paquetes
+
     // Restricciones
     public required string HConstraints { get; init; }
     public required string ConstraintsIntro { get; init; }
@@ -155,6 +166,19 @@ public sealed class ExecTexts
         ColDependencyType = "Tipo de dependencia",
         ColUses = "Nº de usos",
         Category = CategoryEs,
+
+        HLibraries = "Librerías y dependencias",
+        LibrariesIntro = "Inventario de paquetes NuGet referenciados en la solución analizada, con su estado multiplataforma y " +
+                         "su uso real validado contra el código (IL de la salida compilada y using del fuente). El detalle por " +
+                         "paquete y su equivalente portable está en el informe general.",
+        LibReferenced = "Paquetes referenciados",
+        LibCrossPlatform = "Ya multiplataforma",
+        LibReplace = "A reemplazar (con equivalente portable)",
+        LibReview = "A revisar (sin reemplazo directo)",
+        LibUsed = "Usados (validados en código)",
+        LibRemovalCandidates = "Candidatos a quitar (sin uso detectado)",
+        LibCandidatesNote = (n, list) => $"Candidatos a quitar ({n}): {list}. Referenciados pero sin uso detectado en el código; " +
+                                         "confirmar que no se resuelven por reflexión o inyección de dependencias antes de eliminarlos.",
 
         HConstraints = "Restricciones (componentes de terceros)",
         ConstraintsIntro = "Los siguientes componentes son de proveedores externos y NO se pueden migrar ni modificar por " +
@@ -241,6 +265,19 @@ public sealed class ExecTexts
         ColDependencyType = "Dependency type",
         ColUses = "Uses",
         Category = CategoryEn,
+
+        HLibraries = "Libraries and dependencies",
+        LibrariesIntro = "Inventory of NuGet packages referenced by the analyzed solution, with their cross-platform status and " +
+                         "their real usage validated against the code (IL of the compiled output and source using directives). The " +
+                         "per-package detail and its portable equivalent is in the general report.",
+        LibReferenced = "Referenced packages",
+        LibCrossPlatform = "Already cross-platform",
+        LibReplace = "To replace (with a portable equivalent)",
+        LibReview = "To review (no drop-in replacement)",
+        LibUsed = "Used (validated in code)",
+        LibRemovalCandidates = "Removal candidates (no detected use)",
+        LibCandidatesNote = (n, list) => $"Removal candidates ({n}): {list}. Referenced but with no detected use in the code; " +
+                                         "confirm they are not resolved via reflection or dependency injection before removing them.",
 
         HConstraints = "Constraints (third-party components)",
         ConstraintsIntro = "The following components come from external vendors and CANNOT be migrated or modified by us " +

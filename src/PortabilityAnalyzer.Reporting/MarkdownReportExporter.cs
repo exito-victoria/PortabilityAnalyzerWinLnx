@@ -284,11 +284,14 @@ public sealed class MarkdownReportExporter : IReportExporter
 
         sb.AppendLine("## Librerías referenciadas y equivalente multiplataforma");
         sb.AppendLine();
-        sb.AppendLine("> Paquetes NuGet referenciados en la solución/proyecto. **Estado**: *Multiplataforma* (sin cambios), " +
-                      "*Reemplazar* (usar el paquete indicado) o *Revisar* (sin reemplazo directo: reescritura manual con la guía).");
+        sb.AppendLine("> Paquetes NuGet referenciados en la solución/proyecto analizado. **Estado**: *Multiplataforma* (sin cambios), " +
+                      "*Reemplazar* (usar el paquete indicado) o *Revisar* (sin reemplazo directo: reescritura manual con la guía). " +
+                      "**Uso**: validado contra el código (IL de la salida compilada y `using` del fuente): *Usada*, " +
+                      "*Candidata a revisar* (referenciada pero sin uso detectado: verificar reflexión/DI antes de quitar), " +
+                      "*Solo build* (analizador/pruebas) o *No verificable* (proyecto sin compilar o paquete no restaurado).");
         sb.AppendLine();
-        sb.AppendLine("| Paquete | Versión | Estado | Reemplazo multiplataforma | Nota |");
-        sb.AppendLine("|---------|---------|--------|---------------------------|------|");
+        sb.AppendLine("| Paquete | Versión | Estado | Reemplazo multiplataforma | Uso | Proyectos | Nota |");
+        sb.AppendLine("|---------|---------|--------|---------------------------|-----|-----------|------|");
         foreach (var l in libs.OrderBy(l => l.Status).ThenBy(l => l.Package, StringComparer.OrdinalIgnoreCase))
         {
             var estado = l.Status switch
@@ -298,10 +301,28 @@ public sealed class MarkdownReportExporter : IReportExporter
                 _ => "Revisar"
             };
             var repl = l.Replacement is null ? "—" : (l.ReplacementVersion is null ? l.Replacement : $"{l.Replacement} {l.ReplacementVersion}");
-            sb.AppendLine($"| {Cell(l.Package)} | {Cell(l.Version ?? "—")} | {estado} | {Cell(repl)} | {Cell(l.NotaEs)} |");
+            var proyectos = l.Projects.Count > 0 ? string.Join(", ", l.Projects) : "—";
+            var nota = l.UsageEvidenceEs is null ? l.NotaEs : $"{l.NotaEs} {l.UsageEvidenceEs}";
+            sb.AppendLine($"| {Cell(l.Package)} | {Cell(l.Version ?? "—")} | {estado} | {Cell(repl)} | {UsageEs(l.Usage)} | {Cell(proyectos)} | {Cell(nota)} |");
         }
         sb.AppendLine();
+
+        var candidatas = libs.Where(l => l.Usage == LibraryUsage.CandidataARevisar).ToList();
+        if (candidatas.Count > 0)
+        {
+            sb.AppendLine($"> **Candidatas a quitar ({candidatas.Count})**: {string.Join(", ", candidatas.Select(l => l.Package))}. " +
+                          "Referenciadas en el `.csproj` pero sin uso detectado en el código; confirmar que no se resuelven por reflexión o inyección de dependencias antes de eliminarlas.");
+            sb.AppendLine();
+        }
     }
+
+    private static string UsageEs(LibraryUsage u) => u switch
+    {
+        LibraryUsage.Usada => "Usada",
+        LibraryUsage.CandidataARevisar => "Candidata a revisar",
+        LibraryUsage.SoloBuild => "Solo build",
+        _ => "No verificable"
+    };
 
     private static void AppendThirdPartySection(StringBuilder sb, AnalysisReport report)
     {
