@@ -498,9 +498,12 @@ public static class LibraryUsageAnalyzer
         try
         {
             if (!Directory.Exists(projectDir)) return result;
+            // Solo ficheros ACTIVOS en la compilación (se ignoran los removidos del proyecto que siguen en disco).
+            var active = ActiveCompileSet.Resolve(projectDir);
             foreach (var cs in Directory.EnumerateFiles(projectDir, "*.cs", SearchOption.AllDirectories))
             {
                 if (IsIntermediate(cs)) continue;
+                if (active is not null && !active.Contains(ActiveCompileSet.FullPath(cs))) continue;
                 string text;
                 try { text = File.ReadAllText(cs); } catch { continue; }
                 foreach (Match m in UsingDirective.Matches(text))

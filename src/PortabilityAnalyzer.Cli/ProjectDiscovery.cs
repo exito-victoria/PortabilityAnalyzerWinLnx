@@ -23,9 +23,17 @@ internal interface IProjectDiscovery
 internal sealed class ProjectDiscovery : IProjectDiscovery
 {
     // Project("{TypeGuid}") = "Nombre", "ruta\Proyecto.csproj", "{ProjectGuid}"
+    // Grupo 1 = ruta relativa; grupo 2 = GUID del proyecto (opcional, para cruzarlo con la configuración de build).
     private static readonly Regex ProjectLine = new(
-        "^Project\\(\"\\{[0-9A-Fa-f-]+\\}\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+)\"",
+        "^Project\\(\"\\{[0-9A-Fa-f-]+\\}\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+)\"(?:,\\s*\"\\{([0-9A-Fa-f-]+)\\}\")?",
         RegexOptions.Multiline | RegexOptions.Compiled);
+
+    // Líneas de GlobalSection(ProjectConfigurationPlatforms): "{GUID}.<Config>|<Plat>.(Build.0|ActiveCfg) = ...".
+    // Un proyecto ACTIVO en la compilación tiene al menos una línea ".Build.0"; si solo tiene ".ActiveCfg"
+    // está en la solución pero desmarcado del build (no se compila).
+    private static readonly Regex ConfigLine = new(
+        "\\{([0-9A-Fa-f-]+)\\}\\.[^\\r\\n]*?\\.(Build\\.0|ActiveCfg)\\b",
+        RegexOptions.Multiline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex AssemblyNameElement = new(
         "<AssemblyName>\\s*([^<]+?)\\s*</AssemblyName>",
@@ -245,17 +253,44 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
         return new BuildOrder(steps, cycle.Count > 0, cycle);
     }
 
-    /// <summary>Rutas absolutas de los .csproj referenciados por un .sln.</summary>
+    /// <summary>
+    /// Rutas absolutas de los .csproj referenciados por un .sln, restringidas a los proyectos ACTIVOS: solo
+    /// los que existen en disco y que están activos en la compilación (con línea <c>.Build.0</c> en
+    /// <c>ProjectConfigurationPlatforms</c>). Se excluyen así los proyectos removidos de la solución o
+    /// desmarcados del build, cuya carpeta puede seguir en disco pero no debe analizarse ni estimarse.
+    /// Criterio conservador: si no hay sección de configuración, o el proyecto no aparece en ella, se conserva.
+    /// </summary>
     private static IReadOnlyList<string> ResolveProjectsFromSolution(string solutionPath)
     {
         var solutionDir = System.IO.Path.GetDirectoryName(solutionPath)!;
+        var text = File.ReadAllText(solutionPath);
+
+        // GUIDs que aparecen en la configuración y, de ellos, los que tienen alguna línea ".Build.0".
+        var appearsInCfg = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var buildable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match m in ConfigLine.Matches(text))
+        {
+            var guid = m.Groups[1].Value;
+            appearsInCfg.Add(guid);
+            if (m.Groups[2].Value.Equals("Build.0", StringComparison.OrdinalIgnoreCase)) buildable.Add(guid);
+        }
+
         var projects = new List<string>();
-        foreach (Match m in ProjectLine.Matches(File.ReadAllText(solutionPath)))
+        foreach (Match m in ProjectLine.Matches(text))
         {
             var relative = m.Groups[1].Value.Replace('\\', System.IO.Path.DirectorySeparatorChar);
             if (!relative.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
                 continue; // carpetas de solucion u otros tipos de proyecto.
-            projects.Add(System.IO.Path.GetFullPath(System.IO.Path.Combine(solutionDir, relative)));
+
+            // Excluir los que están en la solución pero desmarcados del build (aparecen en configuración sin
+            // ".Build.0"). Si no se conoce el GUID o no aparece en configuración, se conserva por prudencia.
+            var guid = m.Groups[2].Value;
+            if (guid.Length > 0 && appearsInCfg.Contains(guid) && !buildable.Contains(guid))
+                continue;
+
+            var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(solutionDir, relative));
+            if (!File.Exists(full)) continue; // .csproj removido/inexistente en disco: se ignora.
+            projects.Add(full);
         }
         return projects;
     }
