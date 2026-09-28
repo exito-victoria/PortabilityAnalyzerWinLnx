@@ -11,7 +11,14 @@ namespace PortabilityAnalyzer.Engine;
 /// en el código fuente); ante cualquier duda (proyecto sin compilar, paquete sin restaurar, meta-paquete,
 /// uso por reflexión/DI) se deja como "no verificable" para no proponer una eliminación insegura.
 ///
-/// Señales usadas:
+/// Fuentes de dependencias declaradas (todas se inventarían):
+///   - <c>PackageReference</c> de cada <c>.csproj</c> del proyecto.
+///   - <c>PackageReference</c> heredados del <c>Directory.Build.props</c> más cercano (como MSBuild).
+///   - <c>packages.config</c> (proyectos pre-SDK).
+///   - Referencias directas <c>&lt;Reference&gt;</c> con <c>&lt;HintPath&gt;</c> (ensamblados externos no-NuGet,
+///     p. ej. Oracle.DataAccess.dll o Interop.*), que se clasifican por el catálogo.
+///
+/// Señales usadas para el USO:
 ///   1) IL de la salida compilada (bin) de los proyectos propios, leído con Mono.Cecil: qué ensamblados
 ///      referencia realmente el binario (AssemblyReferences).
 ///   2) directivas <c>using</c> del código fuente (.cs) de cada proyecto.
@@ -38,6 +45,17 @@ public static class LibraryUsageAnalyzer
     private static readonly Regex PackageVersionLine = new(
         "<PackageVersion\\b[^>]*?Include\\s*=\\s*\"([^\"]+)\"[^>]*?Version\\s*=\\s*\"([^\"]+)\"",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // packages.config (proyectos pre-SDK): <package id="X" version="Y" [developmentDependency="true"] targetFramework=".."/>.
+    private static readonly Regex PackageTag = new("<package\\b[^>]*?/?>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex IdAttr = new("\\bid\\s*=\\s*\"([^\"]+)\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex DevDependencyAttr = new("developmentDependency\\s*=\\s*\"([^\"]+)\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // <Reference Include="Name, Version=..., Culture=..., PublicKeyToken=..."> con <HintPath>..</HintPath> (ensamblado externo).
+    private static readonly Regex ReferenceBlock = new(
+        "<Reference\\b(?<attrs>[^>]*?)(?:/>|>(?<body>.*?)</Reference>)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    private static readonly Regex HintPathChild = new("<HintPath>\\s*([^<]+?)\\s*</HintPath>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex AssemblyNameElement = new(
         "<AssemblyName>\\s*([^<]+?)\\s*</AssemblyName>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -66,52 +84,54 @@ public static class LibraryUsageAnalyzer
     /// <summary>
     /// Inventario completo: por cada PackageReference distinto (Id) de los proyectos, su versión (resolviendo
     /// Central Package Management), su clasificación multiplataforma (catálogo) y su USO real validado contra el código.
+    /// Incluye también los paquetes de <c>Directory.Build.props</c> / <c>packages.config</c> y las referencias
+    /// directas <c>&lt;Reference&gt;</c> con HintPath.
     /// </summary>
     public static IReadOnlyList<ReferencedLibrary> Build(IReadOnlyList<(string Name, string Dir)> projects)
     {
         var cacheRoot = ResolveNuGetCacheRoot();
 
-        // 1) Recolectar PackageReferences por proyecto (Id -> {versiones, proyectos, buildOnly}).
+        // Id -> agregado. Paquetes NuGet (csproj / props / packages.config) y, aparte, referencias directas.
         var pkgs = new Dictionary<string, PackageAggregate>(StringComparer.OrdinalIgnoreCase);
+        var refs = new Dictionary<string, ReferenceAggregate>(StringComparer.OrdinalIgnoreCase);
         var cpmCache = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        var propsCache = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);        // Directory.Build.props -> texto
         var projectUsings = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);   // proyecto -> namespaces en using
         var projectRefAsm = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);   // proyecto -> ensamblados referenciados en IL
 
         foreach (var (name, dir) in projects)
         {
-            var csproj = SafeFirstCsproj(dir);
-            if (csproj is null) continue;
-            string text;
-            try { text = File.ReadAllText(csproj); } catch { continue; }
-
-            var cpm = ResolveCentralPackageVersions(dir, cpmCache);
             projectUsings[name] = CollectUsings(dir);
-            projectRefAsm[name] = ReadOutputAssemblyReferences(dir, ResolveOutputAssemblyName(text, csproj));
+            var cpm = ResolveCentralPackageVersions(dir, cpmCache);
+            var outputRefs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (Match m in PackageRefBlock.Matches(text))
+            // (a) PackageReference y <Reference> de cada .csproj del proyecto (no solo el primero); el IL de
+            //     salida de cada csproj se une para validar el uso.
+            foreach (var csproj in SafeAllCsproj(dir))
             {
-                var attrs = m.Groups["attrs"].Value;
-                var body = m.Groups["body"].Success ? m.Groups["body"].Value : string.Empty;
-                var inc = IncludeAttr.Match(attrs);
-                if (!inc.Success) continue;
-                var id = inc.Groups[1].Value.Trim();
-                if (id.Length == 0) continue;
+                string text;
+                try { text = File.ReadAllText(csproj); } catch { continue; }
 
-                var version = VersionAttr.Match(attrs) is { Success: true } va ? va.Groups[1].Value.Trim()
-                    : VersionChild.Match(body) is { Success: true } vc ? vc.Groups[1].Value.Trim()
-                    : cpm.TryGetValue(id, out var cv) ? cv
-                    : null;
+                foreach (var a in ReadOutputAssemblyReferences(dir, ResolveOutputAssemblyName(text, csproj)))
+                    outputRefs.Add(a);
 
-                if (!pkgs.TryGetValue(id, out var agg)) { agg = new PackageAggregate(); pkgs[id] = agg; }
-                if (!string.IsNullOrWhiteSpace(version)) agg.Versions.Add(version!);
-                agg.Projects.Add(name);
-                if (IsBuildOnly(id, attrs, body)) agg.BuildOnly = true;
+                AddPackageReferences(text, name, cpm, pkgs);
+                AddDirectReferences(text, name, refs);
             }
+
+            // (b) PackageReference heredados del Directory.Build.props más cercano (como hace MSBuild).
+            var propsText = ResolveDirectoryBuildProps(dir, propsCache);
+            if (propsText is not null)
+                AddPackageReferences(propsText, name, cpm, pkgs);
+
+            // (c) packages.config (proyectos pre-SDK).
+            AddPackagesConfig(dir, name, pkgs);
+
+            projectRefAsm[name] = outputRefs;
         }
 
-        // 2) Clasificar y calcular uso por paquete.
-        return pkgs
-            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+        // 2) Clasificar y calcular uso por paquete NuGet.
+        var result = pkgs
             .Select(kv =>
             {
                 var id = kv.Key;
@@ -129,6 +149,30 @@ public static class LibraryUsageAnalyzer
                 };
             })
             .ToList();
+
+        // 3) Referencias directas (<Reference> con HintPath): ensamblados externos no-NuGet. Se clasifican por el
+        //    catálogo (por nombre de ensamblado) y su uso se valida contra el IL de la salida (el nombre del
+        //    <Reference> ES el del ensamblado). Se omiten las que ya aparecen como paquete para no duplicar.
+        foreach (var kv in refs)
+        {
+            var asmName = kv.Key;
+            if (pkgs.ContainsKey(asmName)) continue;
+            var ragg = kv.Value;
+            var version = ragg.Versions.Count > 0 ? string.Join(", ", ragg.Versions.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)) : null;
+            var baseLib = LibraryReplacements.Classify(asmName, version);
+            var (usage, evEs, evEn) = ComputeReferenceUsage(asmName, ragg, projectRefAsm);
+            result.Add(baseLib with
+            {
+                Usage = usage,
+                Projects = ragg.Projects.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList(),
+                UsageEvidenceEs = evEs,
+                UsageEvidenceEn = evEn
+            });
+        }
+
+        return result
+            .OrderBy(l => l.Package, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private sealed class PackageAggregate
@@ -136,6 +180,114 @@ public static class LibraryUsageAnalyzer
         public SortedSet<string> Versions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> Projects { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool BuildOnly { get; set; }
+    }
+
+    private sealed class ReferenceAggregate
+    {
+        public SortedSet<string> Versions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> Projects { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Registra los <c>PackageReference</c> de un fragmento MSBuild (.csproj o Directory.Build.props)
+    /// en el agregado de paquetes, resolviendo la versión (atributo, hijo o Central Package Management).</summary>
+    private static void AddPackageReferences(
+        string text, string projName, IReadOnlyDictionary<string, string> cpm, Dictionary<string, PackageAggregate> pkgs)
+    {
+        foreach (Match m in PackageRefBlock.Matches(text))
+        {
+            var attrs = m.Groups["attrs"].Value;
+            var body = m.Groups["body"].Success ? m.Groups["body"].Value : string.Empty;
+            var inc = IncludeAttr.Match(attrs);
+            if (!inc.Success) continue;
+            var id = inc.Groups[1].Value.Trim();
+            if (id.Length == 0) continue;
+
+            var version = VersionAttr.Match(attrs) is { Success: true } va ? va.Groups[1].Value.Trim()
+                : VersionChild.Match(body) is { Success: true } vc ? vc.Groups[1].Value.Trim()
+                : cpm.TryGetValue(id, out var cv) ? cv
+                : null;
+
+            if (!pkgs.TryGetValue(id, out var agg)) { agg = new PackageAggregate(); pkgs[id] = agg; }
+            if (!string.IsNullOrWhiteSpace(version)) agg.Versions.Add(version!);
+            agg.Projects.Add(projName);
+            if (IsBuildOnly(id, attrs, body)) agg.BuildOnly = true;
+        }
+    }
+
+    /// <summary>Registra los paquetes de un <c>packages.config</c> (estilo pre-SDK) en el agregado. Un paquete
+    /// con <c>developmentDependency="true"</c> se marca como solo-build.</summary>
+    private static void AddPackagesConfig(string dir, string projName, Dictionary<string, PackageAggregate> pkgs)
+    {
+        string file;
+        try
+        {
+            if (!Directory.Exists(dir)) return;
+            file = Path.Combine(dir, "packages.config");
+            if (!File.Exists(file)) return;
+        }
+        catch { return; }
+
+        string text;
+        try { text = File.ReadAllText(file); } catch { return; }
+
+        foreach (Match m in PackageTag.Matches(text))
+        {
+            var tag = m.Value;
+            var idm = IdAttr.Match(tag);
+            if (!idm.Success) continue;
+            var id = idm.Groups[1].Value.Trim();
+            if (id.Length == 0) continue;
+
+            var version = VersionAttr.Match(tag) is { Success: true } v ? v.Groups[1].Value.Trim() : null;
+
+            if (!pkgs.TryGetValue(id, out var agg)) { agg = new PackageAggregate(); pkgs[id] = agg; }
+            if (!string.IsNullOrWhiteSpace(version)) agg.Versions.Add(version!);
+            agg.Projects.Add(projName);
+
+            var dev = DevDependencyAttr.Match(tag);
+            if ((dev.Success && dev.Groups[1].Value.Equals("true", StringComparison.OrdinalIgnoreCase)) ||
+                DevOnlyPrefixes.Any(p => id.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                agg.BuildOnly = true;
+        }
+    }
+
+    /// <summary>Registra las referencias directas <c>&lt;Reference&gt;</c> que apuntan a un ensamblado externo
+    /// (tienen <c>&lt;HintPath&gt;</c>). Las del framework/GAC (sin HintPath) no se inventarían. El Include puede
+    /// ser un nombre completo ("Name, Version=1.2.3.4, Culture=..., PublicKeyToken=..."): se extrae nombre y versión.</summary>
+    private static void AddDirectReferences(string text, string projName, Dictionary<string, ReferenceAggregate> refs)
+    {
+        foreach (Match m in ReferenceBlock.Matches(text))
+        {
+            var attrs = m.Groups["attrs"].Value;
+            var body = m.Groups["body"].Success ? m.Groups["body"].Value : string.Empty;
+
+            // Solo referencias a un ensamblado externo (con HintPath): las del framework/GAC no se inventarían.
+            if (!HintPathChild.Match(body).Success) continue;
+
+            var inc = IncludeAttr.Match(attrs);
+            if (!inc.Success) continue;
+            var raw = inc.Groups[1].Value.Trim();
+            if (raw.Length == 0) continue;
+
+            var parts = raw.Split(',');
+            var name = parts[0].Trim();
+            if (name.Length == 0) continue;
+
+            string? version = null;
+            foreach (var p in parts.Skip(1))
+            {
+                var kv = p.Split('=', 2);
+                if (kv.Length == 2 && kv[0].Trim().Equals("Version", StringComparison.OrdinalIgnoreCase))
+                {
+                    version = kv[1].Trim();
+                    break;
+                }
+            }
+
+            if (!refs.TryGetValue(name, out var agg)) { agg = new ReferenceAggregate(); refs[name] = agg; }
+            if (!string.IsNullOrWhiteSpace(version)) agg.Versions.Add(version!);
+            agg.Projects.Add(projName);
+        }
     }
 
     /// <summary>Decide el USO de un paquete cruzando la caché (ensamblados/namespaces que aporta) con el IL
@@ -184,6 +336,28 @@ public static class LibraryUsageAnalyzer
         return (LibraryUsage.CandidataARevisar,
             "Su ensamblado no aparece en el IL de la salida compilada ni su namespace en el código fuente. Candidato a quitar; verificar que no se use por reflexión o inyección de dependencias.",
             "Its assembly is not referenced by the compiled IL nor its namespace in the source. Candidate to remove; verify it is not used via reflection or dependency injection.");
+    }
+
+    /// <summary>Decide el USO de una referencia directa (<c>&lt;Reference&gt;</c>): el nombre del Include ES el del
+    /// ensamblado, así que basta comprobarlo contra el IL de la salida. Conservador ante falta de compilación.</summary>
+    private static (LibraryUsage Usage, string? Es, string? En) ComputeReferenceUsage(
+        string asmName, ReferenceAggregate agg, IReadOnlyDictionary<string, HashSet<string>> projectRefAsm)
+    {
+        foreach (var proj in agg.Projects)
+            if (projectRefAsm.TryGetValue(proj, out var r) && r.Contains(asmName))
+                return (LibraryUsage.Usada,
+                    $"Referencia directa (<Reference>) usada en el IL de {proj} (ensamblado {asmName}).",
+                    $"Direct reference (<Reference>) used in the IL of {proj} (assembly {asmName}).");
+
+        var anyOutput = agg.Projects.Any(p => projectRefAsm.TryGetValue(p, out var r) && r.Count > 0);
+        if (!anyOutput)
+            return (LibraryUsage.NoVerificable,
+                "Referencia directa (<Reference>): los proyectos que la declaran no están compilados. Compilar y reanalizar para verificar el uso.",
+                "Direct reference (<Reference>): the declaring projects are not built. Build and re-run to verify usage.");
+
+        return (LibraryUsage.CandidataARevisar,
+            "Referencia directa (<Reference>) cuyo ensamblado no aparece en el IL de la salida compilada. Candidata a quitar; verificar reflexión o carga dinámica.",
+            "Direct reference (<Reference>) whose assembly is absent from the compiled IL. Candidate to remove; verify reflection or dynamic loading.");
     }
 
     /// <summary>True si el <c>using</c> identifica el paquete: exactamente su namespace, o un sub-namespace suyo.
@@ -323,6 +497,7 @@ public static class LibraryUsageAnalyzer
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
+            if (!Directory.Exists(projectDir)) return result;
             foreach (var cs in Directory.EnumerateFiles(projectDir, "*.cs", SearchOption.AllDirectories))
             {
                 if (IsIntermediate(cs)) continue;
@@ -387,6 +562,31 @@ public static class LibraryUsageAnalyzer
         return EmptyMap;
     }
 
+    /// <summary>Texto del <c>Directory.Build.props</c> más cercano al proyecto (subiendo en el árbol, como hace
+    /// MSBuild al importar el primero que encuentra). Null si no hay ninguno. Cacheado por fichero.</summary>
+    private static string? ResolveDirectoryBuildProps(string projectDir, Dictionary<string, string?> cache)
+    {
+        try
+        {
+            var dir = new DirectoryInfo(projectDir);
+            while (dir is not null)
+            {
+                var props = Path.Combine(dir.FullName, "Directory.Build.props");
+                if (File.Exists(props))
+                {
+                    if (cache.TryGetValue(props, out var cached)) return cached;
+                    string? text;
+                    try { text = File.ReadAllText(props); } catch { text = null; }
+                    cache[props] = text;
+                    return text;
+                }
+                dir = dir.Parent;
+            }
+        }
+        catch { /* mejor esfuerzo. */ }
+        return null;
+    }
+
     private static readonly IReadOnlyDictionary<string, string> EmptyMap = new Dictionary<string, string>();
 
     private static string ResolveOutputAssemblyName(string csprojText, string csprojPath)
@@ -395,10 +595,10 @@ public static class LibraryUsageAnalyzer
         return m.Success ? m.Groups[1].Value.Trim() : Path.GetFileNameWithoutExtension(csprojPath);
     }
 
-    private static string? SafeFirstCsproj(string dir)
+    private static IReadOnlyList<string> SafeAllCsproj(string dir)
     {
-        try { return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.csproj").FirstOrDefault() : null; }
-        catch { return null; }
+        try { return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.csproj") : Array.Empty<string>(); }
+        catch { return Array.Empty<string>(); }
     }
 
     private static string? ResolveNuGetCacheRoot()

@@ -205,6 +205,35 @@ public static class LibraryReplacements
             "PdfSharp clásico (build GDI+, atado a System.Drawing en Windows). Usar PdfSharpCore o el build Core de PDFsharp 6 (multiplataforma).",
             "Classic PdfSharp (GDI+ build, tied to System.Drawing on Windows). Use PdfSharpCore or the PDFsharp 6 Core build (cross-platform)."),
 
+        // --- Más Windows-only (añadidos) ---
+        // System.Windows.Extensions reexpone APIs solo-Windows (System.Media.SoundPlayer y afines del escritorio).
+        // Source: learn.microsoft.com/dotnet/api/system.windows.extensions (paquete del Windows Desktop pack).
+        new("System.Windows.Extensions", false, LibraryStatus.Revisar, null, null, null, null,
+            "APIs solo-Windows (System.Media.SoundPlayer y afines del escritorio). Aislar tras una interfaz por SO; sin equivalente multiplataforma directo.",
+            "Windows-only APIs (System.Media.SoundPlayer and related desktop helpers). Isolate behind a per-OS interface; no direct cross-platform equivalent."),
+        // WebView2: control de navegador Edge embebido, solo Windows. Source: learn.microsoft.com/microsoft-edge/webview2.
+        new("Microsoft.Web.WebView2", false, LibraryStatus.Revisar, null, null, null, null,
+            "WebView2 (Edge embebido, solo Windows). Parte de la capa gráfica; aislar tras una interfaz o usar un host web multiplataforma (p. ej. Photino) si se necesita fuera de la GUI.",
+            "WebView2 (embedded Edge, Windows only). Part of the graphical layer; isolate behind an interface or use a cross-platform web host (e.g. Photino) if needed outside the GUI."),
+        // Task Scheduler de Windows (David Hall): envuelve la API COM del programador de tareas. Source: github.com/dahall/TaskScheduler.
+        new("TaskScheduler", false, LibraryStatus.Revisar, "Quartz", "3.13.0", null, null,
+            "Programador de tareas de Windows (API COM, solo Windows). Migrar a Quartz.NET (multiplataforma) o a cron/systemd timers en Linux.",
+            "Windows Task Scheduler (COM API, Windows only). Migrate to Quartz.NET (cross-platform) or cron/systemd timers on Linux."),
+        // Proyecciones WinRT (solo Windows). Source: learn.microsoft.com/windows/apps/desktop/modernize.
+        new("Microsoft.Windows.SDK.Contracts", false, LibraryStatus.Revisar, null, null, null, null,
+            "Contratos de la API de WinRT (solo Windows). Aislar tras una interfaz; no hay equivalente multiplataforma.",
+            "WinRT API contracts (Windows only). Isolate behind an interface; no cross-platform equivalent."),
+        new("Microsoft.Windows.CsWinRT", false, LibraryStatus.Revisar, null, null, null, null,
+            "Interoperabilidad C#/WinRT (solo Windows). Aislar tras una interfaz; sin equivalente multiplataforma.",
+            "C#/WinRT interop (Windows only). Isolate behind an interface; no cross-platform equivalent."),
+        // ACLs de Windows sobre primitivas de sincronización / named pipes (solo Windows). Source: dotnet/runtime.
+        new("System.Threading.AccessControl", false, LibraryStatus.Revisar, null, null, null, null,
+            "ACLs de Windows sobre primitivas de sincronización (solo Windows). En Linux prescindir de la ACL o aislar tras una interfaz por SO.",
+            "Windows ACLs on synchronization primitives (Windows only). On Linux drop the ACL or isolate behind a per-OS interface."),
+        new("System.IO.Pipes.AccessControl", false, LibraryStatus.Revisar, null, null, null, null,
+            "ACLs de Windows sobre named pipes (solo Windows). En Linux usar permisos POSIX del socket o aislar tras una interfaz por SO.",
+            "Windows ACLs on named pipes (Windows only). On Linux use POSIX socket permissions or isolate behind a per-OS interface."),
+
         // --- WPF/WinForms UI toolkits: la GUI de escritorio solo corre en Windows (excepción GUI del objetivo).
         //     No se migran; en Linux se construyen solo las clases/métodos, no la capa gráfica. ---
         new("MahApps.Metro", true, LibraryStatus.Revisar, null, null, null, null,
@@ -240,6 +269,29 @@ public static class LibraryReplacements
         new("Infragistics", true, LibraryStatus.Revisar, null, null, null, null,
             "Suite Infragistics de escritorio (solo Windows). Capa gráfica; no se migra (excepción GUI).",
             "Infragistics desktop suite (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("HandyControl", true, LibraryStatus.Revisar, null, null, null, null,
+            "Biblioteca de controles para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Control library for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("ModernWpf", true, LibraryStatus.Revisar, null, null, null, null,
+            "Estilos Modern UI para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Modern UI styles for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Dragablz", false, LibraryStatus.Revisar, null, null, null, null,
+            "Pestañas/dock para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Tab/dock control for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("AvalonEdit", false, LibraryStatus.Revisar, null, null, null, null,
+            "Editor de texto para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Text editor control for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Dirkster.AvalonDock", true, LibraryStatus.Revisar, null, null, null, null,
+            "Docking para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Docking library for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        new("Gong.WPF", true, LibraryStatus.Revisar, null, null, null, null,
+            "Utilidades drag&drop para WPF (solo Windows). Capa gráfica; no se migra (excepción GUI).",
+            "Drag & drop helpers for WPF (Windows only). Graphical layer; not migrated (GUI exception)."),
+        // Syncfusion: los controles WPF/WinForms son solo-Windows; las variantes Blazor/MAUI/AspNetCore SÍ son
+        // multiplataforma, así que el veredicto depende del sub-paquete. Source: help.syncfusion.com.
+        new("Syncfusion.", true, LibraryStatus.Revisar, null, null, null, null,
+            "Suite Syncfusion. Los controles WPF/WinForms son solo-Windows (capa gráfica, no se migra); las variantes Blazor/MAUI/AspNetCore sí son multiplataforma. Verificar el sub-paquete concreto.",
+            "Syncfusion suite. WPF/WinForms controls are Windows-only (graphical layer, not migrated); the Blazor/MAUI/AspNetCore variants are cross-platform. Check the specific sub-package."),
 
         // --- Known CROSS-PLATFORM (no change required) ---
         new("Oracle.ManagedDataAccess.Core", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
@@ -327,6 +379,36 @@ public static class LibraryReplacements
         new("System.CommandLine", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("Humanizer", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
         new("HtmlAgilityPack", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+
+        // --- CROSS-PLATFORM añadidos (nube, mensajería, ORMs, API/tokens, testing) ---
+        // SDKs de nube: multiplataforma por diseño (soporte oficial .NET en Linux/macOS).
+        new("AWSSDK.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (AWS SDK for .NET).", "Already cross-platform (AWS SDK for .NET)."),
+        new("Azure.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (Azure SDK for .NET).", "Already cross-platform (Azure SDK for .NET)."),
+        new("Microsoft.Azure.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (librerías cliente de Azure).", "Already cross-platform (Azure client libraries)."),
+        new("Google.Cloud.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (Google Cloud .NET).", "Already cross-platform (Google Cloud .NET)."),
+        new("Google.Apis.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (Google API client).", "Already cross-platform (Google API client)."),
+        // Mensajería / streaming.
+        new("MassTransit", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Confluent.Kafka", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (librdkafka incluye binarios Linux).", "Already cross-platform (librdkafka ships Linux binaries)."),
+        // Correo (SMTP/IMAP/POP3) multiplataforma. Source: github.com/jstedfast/MailKit.
+        new("MailKit", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (alternativa portable a System.Net.Mail/EWS).", "Already cross-platform (portable alternative to System.Net.Mail/EWS)."),
+        new("MimeKit", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        // ORMs / migraciones / proveedores de datos.
+        new("NHibernate", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("linq2db", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("FluentMigrator", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("DbUp", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("FirebirdSql.Data.FirebirdClient", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (proveedor Firebird gestionado).", "Already cross-platform (managed Firebird provider)."),
+        // API / OpenAPI / validación de tokens.
+        new("Swashbuckle", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (Swagger para ASP.NET Core).", "Already cross-platform (Swagger for ASP.NET Core)."),
+        new("NSwag", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Microsoft.IdentityModel.", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma (validación de tokens/JWT).", "Already cross-platform (token/JWT validation)."),
+        new("System.IdentityModel.Tokens.Jwt", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        // Fechas / testing / utilidades.
+        new("NodaTime", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("AutoFixture", true, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("Bogus", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
+        new("SharpZipLib", false, LibraryStatus.Multiplataforma, null, null, null, null, "Ya multiplataforma.", "Already cross-platform."),
     };
 
     /// <summary>Finds the catalog entry for a package (exact or prefix match). Null if not present.</summary>
