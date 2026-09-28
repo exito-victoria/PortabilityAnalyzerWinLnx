@@ -84,9 +84,14 @@ public sealed class SourceCodeAnalyzer
         {
             if (!Directory.Exists(dir)) continue;
 
+            // Solo se analizan los ficheros ACTIVOS en la compilación: se ignoran los removidos del proyecto
+            // (los que siguen en disco pero no forman parte del .csproj), para no inflar el análisis con codigo muerto.
+            var active = ActiveCompileSet.Resolve(dir);
+
             foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
             {
                 if (IsGeneratedOrBuild(file, dir)) continue;
+                if (active is not null && !active.Contains(ActiveCompileSet.FullPath(file))) continue;
 
                 string text;
                 try { text = File.ReadAllText(file); }

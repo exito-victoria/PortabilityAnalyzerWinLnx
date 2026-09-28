@@ -44,8 +44,11 @@ public sealed class RuleDiscovery
         foreach (var (name, dir) in projects)
         {
             if (!Directory.Exists(dir)) continue;
+            // Solo ficheros ACTIVOS en la compilación (se ignoran los removidos del proyecto que siguen en disco).
+            var active = ActiveCompileSet.Resolve(dir);
             var csFiles = Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
                 .Where(p => !IsObjBin(p, dir))
+                .Where(p => active is null || active.Contains(ActiveCompileSet.FullPath(p)))
                 .ToList();
             if (csFiles.Count == 0) continue;
 
