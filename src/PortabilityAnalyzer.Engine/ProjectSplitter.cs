@@ -36,10 +36,16 @@ public sealed class ProjectSplitter
         // Todos los ficheros del proyecto (codigo y CONTENIDO: xaml/resx/imagenes/config...), excluyendo
         // obj/bin y el propio .csproj (se regenera). Antes solo se copiaban los .cs, con lo que un WPF
         // quedaba roto (el .xaml.cs sin su .xaml). Ahora se copia y clasifica tambien el contenido.
+        // Los .cs REMOVIDOS de la compilacion (siguen en disco pero no estan en el .csproj) no se reescriben:
+        // el reescritor solo debe trasladar el codigo activo. El contenido no-.cs se conserva (ActiveCompileSet
+        // modela items de compilacion, no contenido; ser conservador evita dejar un WPF sin sus recursos).
+        var active = ActiveCompileSet.Resolve(projectDir);
         var allFiles = Directory.EnumerateFiles(projectDir, "*", SearchOption.AllDirectories)
             .Where(p => !IsObjBin(p, projectDir))
             .Where(p => !p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
             .Where(p => !IsVsJunk(p))
+            .Where(p => !p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                        || active is null || active.Contains(ActiveCompileSet.FullPath(p)))
             .Select(p => (Abs: p, Rel: System.IO.Path.GetRelativePath(projectDir, p)))
             .ToList();
 
