@@ -166,6 +166,25 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
     }
 
     /// <summary>
+    /// Como <see cref="GetProjects"/> pero SIN el filtro de "activo en la compilación": devuelve todos los
+    /// proyectos del <c>.sln</c> que existen en disco. Lo usa la SEPARACIÓN de proyectos, porque un proyecto
+    /// listado explícitamente como separable (roles) debe separarse aunque esté desmarcado del build.
+    /// </summary>
+    public IReadOnlyList<(string Name, string Dir)> GetAllProjects(string inputPath)
+    {
+        var fullPath = System.IO.Path.GetFullPath(inputPath);
+        if (!File.Exists(fullPath)) return Array.Empty<(string, string)>();
+
+        var csprojPaths = fullPath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            ? ResolveProjectsFromSolution(fullPath, onlyActiveInBuild: false)
+            : new[] { fullPath };
+
+        return csprojPaths
+            .Select(c => (Name: ResolveAssemblyName(c), Dir: System.IO.Path.GetDirectoryName(c)!))
+            .ToList();
+    }
+
+    /// <summary>
     /// Resuelve el orden de compilacion de los proyectos por topologia de <c>ProjectReference</c>:
     /// un proyecto se compila despues de aquellos a los que referencia. Agrupa por niveles (los del mismo
     /// nivel no dependen entre si y podrian compilarse en paralelo) y detecta ciclos de referencia.
@@ -260,7 +279,7 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
     /// desmarcados del build, cuya carpeta puede seguir en disco pero no debe analizarse ni estimarse.
     /// Criterio conservador: si no hay sección de configuración, o el proyecto no aparece en ella, se conserva.
     /// </summary>
-    private static IReadOnlyList<string> ResolveProjectsFromSolution(string solutionPath)
+    private static IReadOnlyList<string> ResolveProjectsFromSolution(string solutionPath, bool onlyActiveInBuild = true)
     {
         var solutionDir = System.IO.Path.GetDirectoryName(solutionPath)!;
         var text = File.ReadAllText(solutionPath);
@@ -283,9 +302,11 @@ internal sealed class ProjectDiscovery : IProjectDiscovery
                 continue; // carpetas de solucion u otros tipos de proyecto.
 
             // Excluir los que están en la solución pero desmarcados del build (aparecen en configuración sin
-            // ".Build.0"). Si no se conoce el GUID o no aparece en configuración, se conserva por prudencia.
+            // ".Build.0"). Solo aplica al análisis/estimación (onlyActiveInBuild); la separación de proyectos
+            // usa la lista COMPLETA porque los separables declarados son intención explícita del usuario.
+            // Si no se conoce el GUID o no aparece en configuración, se conserva por prudencia.
             var guid = m.Groups[2].Value;
-            if (guid.Length > 0 && appearsInCfg.Contains(guid) && !buildable.Contains(guid))
+            if (onlyActiveInBuild && guid.Length > 0 && appearsInCfg.Contains(guid) && !buildable.Contains(guid))
                 continue;
 
             var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(solutionDir, relative));

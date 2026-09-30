@@ -17,7 +17,9 @@ public sealed class MarkdownReportExporter : IReportExporter
             sb.AppendLine($"**Proyecto: {report.SourceName}**  ");
         sb.AppendLine($"Generado: {report.GeneratedAt:yyyy-MM-dd HH:mm}  ");
         sb.AppendLine($"Analizados: {report.AnalyzedCount} | Omitidos: {report.SkippedCount} | Con bloqueantes: {report.BlockerCount}  ");
-        sb.AppendLine($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h");
+        var grandTotal = report.CostByBucket.Aggregate(EffortEstimate.Zero, (a, b) => a.Add(b.Effort));
+        sb.AppendLine($"Esfuerzo total de desarrollo: optimista {report.TotalEffort.Optimista:0.#} h | media {report.TotalEffort.Media:0.#} h | pesimista {report.TotalEffort.Pesimista:0.#} h  ");
+        sb.AppendLine($"Esfuerzo total con Pruebas y CI: optimista {grandTotal.Optimista:0.#} h | media {grandTotal.Media:0.#} h | pesimista {grandTotal.Pesimista:0.#} h");
         sb.AppendLine();
         AppendEstimationNote(sb);
 

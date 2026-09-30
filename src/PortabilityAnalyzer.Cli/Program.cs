@@ -152,18 +152,21 @@ internal static class Program
                 var splitBaseDir = Path.Combine(reportDir, "proyectos-separados");
                 Directory.CreateDirectory(splitBaseDir);
 
-                var proyectos = new ProjectDiscovery().GetProjects(options.InputPath);
-                var separables = proyectos.Where(p => roles.IsSeparable(p.Name)).Select(p => p.Name).ToList();
+                // La SEPARACIÓN usa la lista COMPLETA de proyectos (GetAllProjects), no la filtrada por
+                // "activo en build": un separable declarado en roles (divisiblePorUI / obligatorioMultiplataforma /
+                // separables) debe separarse aunque esté desmarcado del build. La lista declarada manda, y se
+                // separan TODOS los que coincidan (no solo el primero).
+                var proyectos = new ProjectDiscovery().GetAllProjects(options.InputPath);
+                var separables = proyectos.Where(p => roles.IsSeparable(p.Name)).ToList();
                 Log.Information("Proyectos descubiertos ({N}): {Proyectos}", proyectos.Count, string.Join(", ", proyectos.Select(p => p.Name)));
                 if (separables.Count == 0)
                     Log.Warning("Ningun proyecto coincide con los roles separables (divisiblePorUI / obligatorioMultiplataforma / separables). " +
                                 "Revisa que los NOMBRES del fichero de roles coincidan con los nombres de proyecto listados arriba. No se generaran proyectos separados.");
                 else
-                    Log.Information("Proyectos a separar: {Separables}", string.Join(", ", separables));
+                    Log.Information("Proyectos a separar ({N}): {Separables}", separables.Count, string.Join(", ", separables.Select(p => p.Name)));
 
-                foreach (var (pname, pdir) in proyectos)
+                foreach (var (pname, pdir) in separables)
                 {
-                    if (!roles.IsSeparable(pname)) continue;
                     if (!Directory.Exists(pdir))
                     {
                         Log.Warning("No se puede separar {Proj}: no existe su carpeta de proyecto '{Dir}'.", pname, pdir);
@@ -223,14 +226,16 @@ internal static class Program
             var imputables = results
                 .Where(r => roles.RoleOf(r.Classification.Name) != ProjectRole.NoModificable)
                 .ToList();
-            var total = imputables
-                .Where(r => r.Classification.Kind == AssemblyKind.Managed)
-                .Select(r => r.Effort)
-                .Aggregate(EffortEstimate.Zero, (acc, e) => acc.Add(e));
 
-            // Desglose del coste por bucket multiplataforma (incluye Pruebas y CI transversal).
+            // Desglose del coste por bucket multiplataforma (esfuerzo IL + fallback por codigo fuente para
+            // proyectos con cambios pero sin esfuerzo IL; incluye Pruebas y CI transversal). El esfuerzo total
+            // de desarrollo es la suma de los buckets de desarrollo, de modo que la cabecera del informe (que
+            // muestra dev y dev+Pruebas/CI) cuadra con la tabla de buckets.
             var costByBucket = new CostBucketEstimator(options.ThirdPartyFactor, options.TestingFactor)
-                .Compute(imputables);
+                .Compute(imputables, sourceFindings, roles);
+            var total = costByBucket
+                .Where(b => b.Bucket != CostBucket.PruebasCI)
+                .Aggregate(EffortEstimate.Zero, (acc, b) => acc.Add(b.Effort));
 
             var report = new AnalysisReport
             {
