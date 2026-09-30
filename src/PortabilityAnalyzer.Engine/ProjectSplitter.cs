@@ -24,8 +24,10 @@ public sealed class ProjectSplitter
     public SplitResult Split(string projectName, string projectDir, IReadOnlyList<SourceFinding> findings, string outputDir)
     {
         var baseName = projectName.Replace(" ", string.Empty);
-        var multiName = baseName + "Multi";
-        var winName = baseName;
+        // Convencion de nombres de la separacion: el nucleo portable es "<Proyecto>.Core" (multiplataforma,
+        // no dependiente de Windows) y la parte dependiente de Windows es "<Proyecto>.Windows".
+        var multiName = baseName + ".Core";
+        var winName = baseName + ".Windows";
         var multiDir = System.IO.Path.Combine(outputDir, multiName);
         var winDir = System.IO.Path.Combine(outputDir, winName);
 
@@ -108,10 +110,10 @@ public sealed class ProjectSplitter
         RecreateDir(multiDir);
         RecreateDir(winDir);
 
-        // El proyecto Multi tiene su PROPIO namespace raiz (<root> -> <root>Multi)
-        // (p. ej. SharedTools -> SharedToolsMulti). El proyecto Windows conserva el namespace original.
+        // El nucleo portable tiene su PROPIO namespace raiz (<root> -> <root>.Core)
+        // (p. ej. SharedTools -> SharedTools.Core). El proyecto Windows conserva el namespace original.
         var rootNs = DetectRootNamespace(codeFiles);
-        var multiRootNs = rootNs is null ? null : rootNs + "Multi";
+        var multiRootNs = rootNs is null ? null : rootNs + ".Core";
         Func<string, string>? multiTransform =
             (rootNs is null || multiRootNs is null) ? null : c => RebaseNamespace(c, rootNs, multiRootNs);
 
