@@ -98,12 +98,13 @@ Fichero JSON que asigna un papel a cada proyecto (coincidencia por nombre, flexi
 
 - **obligatorioMultiplataforma**: prioridad máxima; el informe da el **análisis de los cambios** para hacerlos portables.
 - **noModificables**: de terceros; **no se migran** (es del proveedor), su esfuerzo **no se imputa**, y se dan **opciones viables** para ejecutarlos en el entorno destino.
-- **divisiblePorUI** / **separables**: proyectos a **separar** en dos (ver "Generador de división").
+- **divisiblePorUI** / **obligatorioMultiplataforma** / **separables**: proyectos a **separar** en dos (ver "Generador de división"). Se separan **todos** los proyectos que coincidan con cualquiera de las tres listas, no solo el primero.
 
 ## Los tres informes
 
 - **General** (Markdown y **Word en español e inglés** — `informe.docx` e `informe_EN.docx`): resumen, **coste por bloque**, **orden de compilación** (con Target Framework),
-  **recomendación de arquitectura** con un **ejemplo de migración** real y la definición de «seam»,
+  **recomendación de arquitectura** (siempre nombrada a partir de la solución/proyecto pasado en `--path`/
+  `--solution`, nunca de un proyecto arbitrario de la solución) con un **ejemplo de migración** real y la definición de «seam»,
   **análisis de terceros**, **terceros no modificables** (restricción + opciones), **inventario de librerías y NuGets
   referenciados y su equivalente multiplataforma** (reemplazo directo, o **alternativa propuesta** cuando el estado es
   "revisar"; catálogo curado a partir de guías de Microsoft) **con validación de uso real contra el código** (ver abajo),
@@ -152,10 +153,15 @@ Valores de uso (criterio **conservador**: solo se propone quitar con evidencia p
 
 ## Generador de división de proyectos (split)
 
-Para los proyectos con rol `divisiblePorUI`, `obligatorioMultiplataforma` o listados en `separables`, genera
-en una subcarpeta dedicada **`proyectos-separados/`** (nunca colisiona con el código original) dos proyectos:
+Para **todos** los proyectos con rol `divisiblePorUI`, `obligatorioMultiplataforma` o listados en `separables`
+(no solo el primero que coincida), genera en una subcarpeta dedicada **`proyectos-separados/`** (nunca
+colisiona con el código original) dos proyectos:
 
-- **`<Nombre>Multi`** (`net8.0`, núcleo portable) y **`<Nombre>`** (`net8.0-windows`).
+- **`<Nombre>.Core`** (`net8.0`, núcleo portable) y **`<Nombre>.Windows`** (`net8.0-windows`).
+- **Misma estructura de carpetas que el original**: si el proyecto vivía en una subcarpeta (p. ej.
+  `Common\CommonPA`), su `.Core`/`.Windows` se generan dentro de esa misma subcarpeta reproducida bajo
+  `proyectos-separados/` (`proyectos-separados\Common\CommonPA.Core` y `...\CommonPA.Windows`), en vez de
+  quedar todos los proyectos sueltos en la raíz de `proyectos-separados/`.
 - Clasifica por fichero (hallazgos + herencia + clases parciales), copia también el **contenido**
   (XAML/resx/recursos), usa **namespace separado** para el núcleo y genera `GlobalUsings.cs`.
 - **Seams por categoría**: interfaz portable en el núcleo + implementación Windows real (con su paquete NuGet).
@@ -191,6 +197,11 @@ Cada proyecto se clasifica y emite así:
 
 Qué hace, ya **implementado** (no son TODOs):
 
+- **Misma estructura de carpetas que la solución original**: cada proyecto generado se escribe dentro de la
+  misma carpeta contenedora que tenía el proyecto original, relativa a la solución (p. ej. un proyecto
+  `Common\CommonPA` produce `Common\CommonPA.Core` y `Common\CommonPA.Windows` dentro de la solución
+  reescrita, no sueltos en la raíz de salida). Las `ProjectReference` entre proyectos generados se calculan
+  con rutas relativas reales, no asumiendo que todos son hermanos directos.
 - **Respeta la configuración real del proyecto**: antes de separar, lee los ficheros de configuración y
   **omite por completo** lo que el proyecto no compila — `<Compile Remove>`, `<EnableDefaultCompileItems>false</...>`
   (usando entonces los `<Compile Include>`), y las **carpetas/ficheros ignorados** por `.gitignore` (de la solución

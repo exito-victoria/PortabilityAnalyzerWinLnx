@@ -155,9 +155,15 @@ internal static class Program
                 // La SEPARACIÓN usa la lista COMPLETA de proyectos (GetAllProjects), no la filtrada por
                 // "activo en build": un separable declarado en roles (divisiblePorUI / obligatorioMultiplataforma /
                 // separables) debe separarse aunque esté desmarcado del build. La lista declarada manda, y se
-                // separan TODOS los que coincidan (no solo el primero).
+                // separan TODOS los que coincidan (no solo el primero). Comprobacion EXPLICITA contra las tres
+                // listas (en vez de roles.IsSeparable, que en la practica podia dejar fuera proyectos declarados
+                // en "separables" cuando habia varios): asi ningun proyecto de las listas se pierde.
                 var proyectos = new ProjectDiscovery().GetAllProjects(options.InputPath);
-                var separables = proyectos.Where(p => roles.IsSeparable(p.Name)).ToList();
+                var separables = (from p in proyectos
+                                   where roles.Separables.Contains(p.Name, StringComparer.OrdinalIgnoreCase)
+                                      || roles.DivisiblePorUI.Contains(p.Name, StringComparer.OrdinalIgnoreCase)
+                                      || roles.ObligatorioMultiplataforma.Contains(p.Name, StringComparer.OrdinalIgnoreCase)
+                                   select p).Distinct().ToList();
                 Log.Information("Proyectos descubiertos ({N}): {Proyectos}", proyectos.Count, string.Join(", ", proyectos.Select(p => p.Name)));
                 if (separables.Count == 0)
                     Log.Warning("Ningun proyecto coincide con los roles separables (divisiblePorUI / obligatorioMultiplataforma / separables). " +
@@ -165,6 +171,12 @@ internal static class Program
                 else
                     Log.Information("Proyectos a separar ({N}): {Separables}", separables.Count, string.Join(", ", separables.Select(p => p.Name)));
 
+                // Carpeta de la solucion/proyecto de entrada: se usa para calcular, por cada separable, la
+                // carpeta que lo CONTIENE (p. ej. "Common" para "Common\CommonPA") y reproducirla dentro de
+                // 'proyectos-separados'. Asi CommonPA.Core/CommonPA.Windows quedan en
+                // 'proyectos-separados\Common\', igual que el original, en vez de todos los proyectos sueltos
+                // y mezclados en la raiz de 'proyectos-separados'.
+                var slnDir = Path.GetDirectoryName(Path.GetFullPath(options.InputPath));
                 foreach (var (pname, pdir) in separables)
                 {
                     if (!Directory.Exists(pdir))
@@ -174,10 +186,17 @@ internal static class Program
                     }
                     try
                     {
-                        var r = new ProjectSplitter().Split(pname, pdir, sourceFindings, splitBaseDir);
+                        var container = slnDir is null ? null
+                            : Path.GetRelativePath(slnDir, Path.GetDirectoryName(Path.GetFullPath(pdir)) ?? slnDir);
+                        var projectOutDir = string.IsNullOrEmpty(container) || container == "."
+                            ? splitBaseDir
+                            : Path.Combine(splitBaseDir, container);
+                        Directory.CreateDirectory(projectOutDir);
+
+                        var r = new ProjectSplitter().Split(pname, pdir, sourceFindings, projectOutDir);
                         splitResults.Add(r);
                         Log.Information("Split de {Proj}: {Multi} ({P} ficheros) + {Win} ({W} ficheros) en {Dir}",
-                            pname, r.MultiProject, r.PortableFiles, r.WindowsProject, r.WindowsFiles, splitBaseDir);
+                            pname, r.MultiProject, r.PortableFiles, r.WindowsProject, r.WindowsFiles, projectOutDir);
                     }
                     catch (Exception ex) { Log.Warning(ex, "No se pudo dividir {Proj}: {Error}", pname, ex.Message); }
                 }

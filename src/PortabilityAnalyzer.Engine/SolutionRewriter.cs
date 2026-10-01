@@ -262,6 +262,53 @@ public sealed class SolutionRewriter
         }
         var infoByName = infos.ToDictionary(i => i.Name, i => i, StringComparer.OrdinalIgnoreCase);
 
+        // Carpeta que CONTIENE cada proyecto original, relativa a la solución (p. ej. "Common" para
+        // "Common\CommonPA"): se reproduce en la salida para que los proyectos generados mantengan la MISMA
+        // estructura de carpetas que el original, en vez de quedar todos sueltos en la raíz de outputDir.
+        string RelContainerOf(ProjInfo i)
+        {
+            if (solutionDir is null) return string.Empty;
+            var parent = Path.GetDirectoryName(Path.GetFullPath(i.Dir)) ?? solutionDir;
+            var rel = Path.GetRelativePath(Path.GetFullPath(solutionDir), parent);
+            return rel == "." ? string.Empty : rel;
+        }
+        string RelOutDirFor(ProjInfo i, string outName)
+        {
+            var container = RelContainerOf(i);
+            return string.IsNullOrEmpty(container) ? outName : Path.Combine(container, outName);
+        }
+
+        // Mapa de cada nombre de proyecto GENERADO -> su carpeta de salida relativa a outputDir. Al conservar
+        // la carpeta contenedora original, dos proyectos ya no son necesariamente hermanos directos bajo
+        // outputDir, así que las referencias entre ellos (ProjectReference) se recalculan con rutas relativas
+        // reales (ProjRelPathsFrom) en vez de asumir siempre "..\Nombre\Nombre.csproj".
+        var outRelDirByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var info in infos)
+        {
+            if (info.Excluded) { outRelDirByName[info.Name] = RelOutDirFor(info, info.Name); continue; }
+            if (info.PortableName is not null) outRelDirByName[info.PortableName] = RelOutDirFor(info, info.PortableName);
+            if (info.CoreName is not null) outRelDirByName[info.CoreName] = RelOutDirFor(info, info.CoreName);
+            if (info.WinName is not null) outRelDirByName[info.WinName] = RelOutDirFor(info, info.WinName);
+        }
+
+        // Ruta relativa (estilo csproj) desde la carpeta de salida de 'callerOutName' a cada proyecto de
+        // 'refNames', calculada de verdad con Path.GetRelativePath (ya no son necesariamente hermanos
+        // directos). Si algún nombre no está en el mapa (no debería ocurrir), se usa el supuesto plano anterior.
+        IReadOnlyList<string> ProjRelPathsFrom(string callerOutName, IReadOnlyList<string> refNames)
+        {
+            var callerRelDir = outRelDirByName.TryGetValue(callerOutName, out var crd) ? crd : callerOutName;
+            var callerFull = Path.GetFullPath(Path.Combine(outputDir, callerRelDir));
+            var list = new List<string>();
+            foreach (var n in refNames)
+            {
+                var targetRelDir = outRelDirByName.TryGetValue(n, out var trd) ? trd : n;
+                var targetFull = Path.GetFullPath(Path.Combine(outputDir, targetRelDir));
+                var rel = Path.GetRelativePath(callerFull, targetFull);
+                list.Add($"{rel}\\{n}.csproj");
+            }
+            return list;
+        }
+
         // Referencia que debe usar un proyecto NÚCLEO/portable (net8.0) al referenciar 'origRef'.
         string? CoreSideRef(string origRef)
         {
@@ -316,17 +363,17 @@ public sealed class SolutionRewriter
             if (info.Excluded)
             {
                 var outName = info.Name;
-                var projDir = Path.Combine(outputDir, outName);
+                var projDir = Path.Combine(outputDir, outRelDirByName[outName]);
                 // Not split -> own namespace preserved; references to split projects resolve to the Windows side.
                 CopyCode(info.CodeFiles, info.Dir, projDir, outName, null, rebaser, NamespaceRebaser.Side.Windows, null);
                 CopyContent(info.ContentFiles, projDir);
                 if (info.HasEntryPoint) entryPointOutputs.Add((outName, projDir, info));
                 var refs = info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList();
-                var relPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
+                var relPaths = ProjRelPathsFrom(outName, refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
                 var tfm = string.IsNullOrWhiteSpace(info.Tfm) ? "net8.0-windows" : info.Tfm!;
                 WriteCsproj(Path.Combine(projDir, outName + ".csproj"), tfm, info.PackageLines, info.UseWpf, info.UseWinForms,
                     info.OutputType, refs, relPaths, windowsOnlyFilter: false, source: info);
-                emitted.Add((outName, $"{outName}\\{outName}.csproj"));
+                emitted.Add((outName, $"{outRelDirByName[outName]}\\{outName}.csproj"));
                 rewritten.Add(new RewrittenProject(info.Name, "Excluido",
                     $"En la lista de exclusión: copiado entero sin separar (TFM {tfm})",
                     new[] { outName }, 0, info.CodeFiles.Count));
@@ -338,7 +385,7 @@ public sealed class SolutionRewriter
                 case Kind.Portable:
                 {
                     var outName = info.PortableName!;
-                    var projDir = Path.Combine(outputDir, outName);
+                    var projDir = Path.Combine(outputDir, outRelDirByName[outName]);
                     var portFiles = info.PortableCode.Concat(info.WinCode).ToList();
                     // Library-first: swap safe namespaces and mark the Windows-only APIs that remain.
                     var nsSwaps = NamespaceSwapsFor(info);
@@ -355,10 +402,10 @@ public sealed class SolutionRewriter
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null && WinSideRef(rn) is not null)
                             warnings.Add($"'{outName}' (portable) referenciaba a '{rn}', que quedó solo-Windows: revisar (introducir un seam) o mantener este proyecto en net8.0-windows.");
-                    var portableRelPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
+                    var portableRelPaths = ProjRelPathsFrom(outName, refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0", PortablePackageLines(info, portFiles), info.UseWpf, info.UseWinForms,
                         (IsExeType(info.OutputType) || info.HasEntryPoint) ? info.OutputType : null, refs, portableRelPaths, windowsOnlyFilter: false, source: info);
-                    emitted.Add((outName, $"{outName}\\{outName}.csproj"));
+                    emitted.Add((outName, $"{outRelDirByName[outName]}\\{outName}.csproj"));
                     var alreadyNet8 = info.Tfm is not null && !info.Tfm.Contains("-windows", StringComparison.OrdinalIgnoreCase);
                     var portableReason = alreadyNet8
                         ? $"Ya estaba en {info.Tfm} sin dependencias de Windows: ya separado, copiado sin cambios"
@@ -370,16 +417,16 @@ public sealed class SolutionRewriter
                 case Kind.WindowsOnly:
                 {
                     var outName = info.WinName!;
-                    var projDir = Path.Combine(outputDir, outName);
+                    var projDir = Path.Combine(outputDir, outRelDirByName[outName]);
                     // Not split (whole project is Windows) -> own namespace preserved; refs to splits -> Windows side.
                     CopyCode(info.PortableCode.Concat(info.WinCode), info.Dir, projDir, outName, null, rebaser, NamespaceRebaser.Side.Windows, null);
                     CopyContent(info.PortableContent.Concat(info.WinContent), projDir);
                     if (info.HasEntryPoint) entryPointOutputs.Add((outName, projDir, info));
                     var refs = info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList();
-                    var winOnlyRelPaths = ProjRelPaths(refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
+                    var winOnlyRelPaths = ProjRelPathsFrom(outName, refs).Concat(ExternalRelPaths(info.ExternalRefs, projDir, onlyPortable: false)).ToList();
                     WriteCsproj(Path.Combine(projDir, outName + ".csproj"), "net8.0-windows", info.PackageLines, info.UseWpf, info.UseWinForms,
                         info.OutputType, refs, winOnlyRelPaths, windowsOnlyFilter: false, source: info);
-                    emitted.Add((outName, $"{outName}\\{outName}.csproj"));
+                    emitted.Add((outName, $"{outRelDirByName[outName]}\\{outName}.csproj"));
                     rewritten.Add(new RewrittenProject(info.Name, "SoloWindows",
                         "Todo el proyecto depende de Windows (UI/entrada sin parte portable)",
                         new[] { outName }, 0, info.WinCode.Count));
@@ -389,8 +436,8 @@ public sealed class SolutionRewriter
                 {
                     var coreName = info.CoreName!;
                     var winName = info.WinName!;
-                    var coreDir = Path.Combine(outputDir, coreName);
-                    var winDir = Path.Combine(outputDir, winName);
+                    var coreDir = Path.Combine(outputDir, outRelDirByName[coreName]);
+                    var winDir = Path.Combine(outputDir, outRelDirByName[winName]);
 
                     // Seam pass already computed up front (the final Core/Windows split).
                     var seam = seamResults[info];
@@ -417,10 +464,10 @@ public sealed class SolutionRewriter
                     foreach (var rn in info.RefNames)
                         if (CoreSideRef(rn) is null)
                             warnings.Add($"El núcleo '{coreName}' referenciaba a '{rn}', que quedó solo-Windows: introducir un seam (interfaz) en el núcleo o mover el uso a '{winName}'.");
-                    var coreRelPaths = ProjRelPaths(coreRefs).Concat(ExternalRelPaths(info.ExternalRefs, coreDir, onlyPortable: true)).ToList();
+                    var coreRelPaths = ProjRelPathsFrom(coreName, coreRefs).Concat(ExternalRelPaths(info.ExternalRefs, coreDir, onlyPortable: true)).ToList();
                     WriteCsproj(Path.Combine(coreDir, coreName + ".csproj"), "net8.0", PortablePackageLines(info, seam.Portable), false, false,
                         null, coreRefs, coreRelPaths, windowsOnlyFilter: false, source: info);
-                    emitted.Add((coreName, $"{coreName}\\{coreName}.csproj"));
+                    emitted.Add((coreName, $"{outRelDirByName[coreName]}\\{coreName}.csproj"));
 
                     // WINDOWS (net8.0-windows): Windows files rebased to 'winName'. Because the project was split,
                     // a Windows file may reference (by simple name, same original namespace) a type that moved to
@@ -455,12 +502,15 @@ public sealed class SolutionRewriter
 
                     var winRefs = new List<string> { coreName };
                     winRefs.AddRange(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!));
+                    // coreName y winName comparten siempre la misma carpeta contenedora (proceden del mismo
+                    // proyecto original), así que siguen siendo hermanos directos: la referencia a coreName
+                    // no necesita el cálculo general de ProjRelPathsFrom.
                     var winRelPaths = new List<string> { $"..\\{coreName}\\{coreName}.csproj" };
-                    winRelPaths.AddRange(ProjRelPaths(info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList()));
+                    winRelPaths.AddRange(ProjRelPathsFrom(winName, info.RefNames.Select(WinSideRef).Where(x => x is not null).Select(x => x!).ToList()));
                     winRelPaths.AddRange(ExternalRelPaths(info.ExternalRefs, winDir, onlyPortable: false));
                     WriteCsproj(Path.Combine(winDir, winName + ".csproj"), "net8.0-windows", winPkgs, info.UseWpf, info.UseWinForms,
                         (IsExeType(info.OutputType) || info.HasEntryPoint) ? (info.OutputType ?? "WinExe") : null, winRefs, winRelPaths, windowsOnlyFilter: false, source: info);
-                    emitted.Add((winName, $"{winName}\\{winName}.csproj"));
+                    emitted.Add((winName, $"{outRelDirByName[winName]}\\{winName}.csproj"));
 
                     rewritten.Add(new RewrittenProject(info.Name, "Separable",
                         $"{seam.Portable.Count} fichero(s) en el núcleo + {seam.Win.Count} con dependencias de Windows" +
@@ -482,11 +532,19 @@ public sealed class SolutionRewriter
             var baseName = solutionName.EndsWith("-multiplataforma", StringComparison.OrdinalIgnoreCase)
                 ? solutionName[..^"-multiplataforma".Length] : solutionName;
             abstractionsName = SanitizeProjectName(baseName) + ".Abstractions";
+            // Capa generada SIN proyecto original de referencia: se deja en la raíz de outputDir (no hay
+            // carpeta contenedora que preservar para ella).
             var absDir = Path.Combine(outputDir, abstractionsName);
             WriteGenerated(AbstractionsGenerator.Build(abstractionsName, relevantCats).Select(g => (g.Rel, g.Content)), absDir);
             // Reference the abstraction layer from every already-emitted project so the interfaces are available.
+            // Ruta relativa real (no asume hermanos directos: un proyecto emitido puede estar anidado en su
+            // carpeta contenedora original mientras que .Abstractions vive en la raíz).
             foreach (var (_, relCsproj) in emitted)
-                InjectProjectReference(Path.Combine(outputDir, relCsproj), $"..\\{abstractionsName}\\{abstractionsName}.csproj");
+            {
+                var projDir = Path.GetDirectoryName(Path.Combine(outputDir, relCsproj))!;
+                var relToAbs = Path.GetRelativePath(projDir, absDir);
+                InjectProjectReference(Path.Combine(outputDir, relCsproj), $"{relToAbs}\\{abstractionsName}.csproj");
+            }
             emitted.Add((abstractionsName, $"{abstractionsName}\\{abstractionsName}.csproj"));
             rewritten.Add(new RewrittenProject("(capa de abstracción)", "Abstracciones",
                 $"Generada con {relevantCats.Count} interfaz(es) portable(s) e implementación multiplataforma por defecto (DI): {string.Join(", ", relevantCats.OrderBy(c => c))}",
@@ -919,9 +977,6 @@ public sealed class SolutionRewriter
     // ---------------------------------------------------------------------------------------------
     // Generación de csproj / sln
     // ---------------------------------------------------------------------------------------------
-
-    private static IReadOnlyList<string> ProjRelPaths(IReadOnlyList<string> refNames) =>
-        refNames.Select(n => $"..\\{n}\\{n}.csproj").ToList();
 
     /// <summary>Lee el valor de una propiedad simple del PropertyGroup del csproj (o null si no está).</summary>
     private static string? Prop(string csprojText, string name) =>
