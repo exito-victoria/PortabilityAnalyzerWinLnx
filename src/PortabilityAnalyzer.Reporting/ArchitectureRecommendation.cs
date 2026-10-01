@@ -64,10 +64,11 @@ public static class ArchitectureRecommendation
             .Take(12)
             .ToList();
 
-        var baseName = (report.Assemblies
-            .Where(a => !a.IsThirdParty && a.Classification.Kind == AssemblyKind.Managed)
-            .Select(a => a.Classification.Name)
-            .FirstOrDefault() ?? "App").Replace(" ", string.Empty);
+        // El nombre base de la arquitectura destino es siempre el de la solucion/proyecto pasado en
+        // --path/--solution (report.SourceName), NUNCA el primero de los ensamblados analizados: con una
+        // solucion de varios proyectos, tomar "el primero" era arbitrario (dependia del orden de
+        // descubrimiento) y no representaba el proyecto objetivo real.
+        var baseName = (string.IsNullOrWhiteSpace(report.SourceName) ? "App" : report.SourceName).Replace(" ", string.Empty);
 
         var projects = new List<RecommendedProject>
         {

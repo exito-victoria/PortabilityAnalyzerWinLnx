@@ -153,9 +153,15 @@ internal static class Program
                 // La SEPARACIÓN usa la lista COMPLETA de proyectos (GetAllProjects), no la filtrada por
                 // "activo en build": un separable declarado en roles (divisiblePorUI / obligatorioMultiplataforma /
                 // separables) debe separarse aunque esté desmarcado del build. La lista declarada manda, y se
-                // separan TODOS los que coincidan (no solo el primero).
+                // separan TODOS los que coincidan (no solo el primero). Comprobacion EXPLICITA contra las tres
+                // listas (en vez de roles.IsSeparable, que en la practica podia dejar fuera proyectos declarados
+                // en "separables" cuando habia varios): asi ningun proyecto de las listas se pierde.
                 var proyectos = new ProjectDiscovery().GetAllProjects(options.InputPath);
-                var separables = proyectos.Where(p => roles.IsSeparable(p.Name)).ToList();
+                var separables = (from p in proyectos
+                                   where roles.Separables.Contains(p.Name, StringComparer.OrdinalIgnoreCase)
+                                      || roles.DivisiblePorUI.Contains(p.Name, StringComparer.OrdinalIgnoreCase)
+                                      || roles.ObligatorioMultiplataforma.Contains(p.Name, StringComparer.OrdinalIgnoreCase)
+                                   select p).Distinct().ToList();
                 Log.Information("Proyectos descubiertos ({N}): {Proyectos}", proyectos.Count, string.Join(", ", proyectos.Select(p => p.Name)));
                 if (separables.Count == 0)
                     Log.Warning("Ningun proyecto coincide con los roles separables (divisiblePorUI / obligatorioMultiplataforma / separables). " +
